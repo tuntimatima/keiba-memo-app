@@ -57,6 +57,10 @@ export default function Home() {
   // auth
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
+  // login UI（Magic Link）
+  const [loginEmail, setLoginEmail] = useState('');
+  const [authBusy, setAuthBusy] = useState(false);
+
   // UI: 日付/開催/レース
   const [selectedDate, setSelectedDate] = useState(''); // YYYY-MM-DD
   const [availablePlaces, setAvailablePlaces] = useState<Place[]>([]);
@@ -95,6 +99,37 @@ export default function Home() {
 
     return () => sub.subscription.unsubscribe();
   }, []);
+
+  async function loginWithMagicLink() {
+    const email = loginEmail.trim();
+    if (!email) {
+      setMsg('メールアドレスを入力してください');
+      return;
+    }
+    setAuthBusy(true);
+    setMsg('');
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        // 本番URL（固定）
+        emailRedirectTo: 'https://keiba-memo-app.vercel.app',
+      },
+    });
+
+    if (error) setMsg(`ログイン失敗: ${error.message}`);
+    else setMsg('ログイン用リンクをメールに送信しました（メールを確認してください）');
+
+    setAuthBusy(false);
+  }
+
+  async function logout() {
+    setAuthBusy(true);
+    setMsg('');
+    const { error } = await supabase.auth.signOut();
+    if (error) setMsg(`ログアウト失敗: ${error.message}`);
+    setAuthBusy(false);
+  }
 
   // ===== Helpers =====
   function cellKey(horseId: string, raceId: string) {
@@ -521,7 +556,53 @@ export default function Home() {
             )}
           </div>
 
-          <div className="pill">ログイン: {userEmail ?? '(未ログイン)'}</div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <div className="pill">ログイン: {userEmail ?? '(未ログイン)'}</div>
+
+            {userEmail ? (
+              <button
+                type="button"
+                onClick={logout}
+                disabled={authBusy}
+                className="pill"
+                style={{ cursor: 'pointer' }}
+              >
+                ログアウト
+              </button>
+            ) : (
+              <>
+                <input
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  placeholder="メールアドレス"
+                  style={{
+                    height: 32,
+                    padding: '0 10px',
+                    border: '1px solid #ccc',
+                    borderRadius: 8,
+                    minWidth: 220,
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={loginWithMagicLink}
+                  disabled={authBusy}
+                  style={{
+                    height: 32,
+                    padding: '0 12px',
+                    borderRadius: 8,
+                    border: '1px solid #16a34a',
+                    background: '#16a34a',
+                    color: '#fff',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  メールでログイン
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         <Link className="import-btn" href="/import">
