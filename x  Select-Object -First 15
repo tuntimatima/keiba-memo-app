@@ -1,0 +1,1235 @@
+[1mdiff --git a/app/import/page.tsx b/app/import/page.tsx[m
+[1mindex 16bd171..43d0aab 100644[m
+[1m--- a/app/import/page.tsx[m
+[1m+++ b/app/import/page.tsx[m
+[36m@@ -1,17 +1,33 @@[m
+ ﻿'use client';[m
+[31m-import { supabase } from '../../lib/supabaseClient';[m
+ [m
+[31m-import { supabase } from '../../lib/supabaseClient';[m
+[31m-import { supabase } from '../lib/supabaseClient';[m
+[31m-import { useMemo, useState } from 'react';[m
+ import Link from 'next/link';[m
+[32m+[m[32mimport { useEffect, useMemo, useState } from 'react';[m
+[32m+[m[32mimport { supabase } from '../../lib/supabaseClient';[m
+ [m
+[32m+[m[32mtype CsvRow = Record<string, string>;[m
+[32m+[m
+[32m+[m[32mconst REQUIRED_HEADERS = [[m
+[32m+[m[32m  'レースID(新)',[m
+[32m+[m[32m  '日付S',[m
+[32m+[m[32m  '場所',[m
+[32m+[m[32m  'Ｒ',[m
+[32m+[m[32m  'レース名',[m
+[32m+[m[32m  '芝ダ',[m
+[32m+[m[32m  '距離',[m
+[32m+[m[32m  '枠番',[m
+[32m+[m[32m  '馬番',[m
+[32m+[m[32m  '馬名',[m
+[32m+[m[32m  '血統登録番号',[m
+[32m+[m[32m  '馬印8',[m
+[32m+[m[32m  'レースコメント',[m
+[32m+[m[32m  '結果コメント',[m
+[32m+[m[32m] as const;[m
+ [m
+[31m-// 繝繝悶Ν繧ｯ繧ｩ繝ｼ繝亥ｯｾ蠢懊・邁｡譏鼎SV繝代・繧ｵ・郁｡悟腰菴搾ｼ・[m
+ function parseCsv(text: string): string[][] {[m
+[32m+[m[32m  // RFC4180-ish parser (handles quotes, commas, CRLF)[m
+   const rows: string[][] = [];[m
+   let row: string[] = [];[m
+[31m-  let cell = '';[m
+[32m+[m[32m  let field = '';[m
+   let inQuotes = false;[m
+ [m
+   for (let i = 0; i < text.length; i++) {[m
+[36m@@ -21,13 +37,13 @@[m [mfunction parseCsv(text: string): string[][] {[m
+       if (ch === '"') {[m
+         const next = text[i + 1];[m
+         if (next === '"') {[m
+[31m-          cell += '"';[m
+[32m+[m[32m          field += '"';[m
+           i++;[m
+         } else {[m
+           inQuotes = false;[m
+         }[m
+       } else {[m
+[31m-        cell += ch;[m
+[32m+[m[32m        field += ch;[m
+       }[m
+       continue;[m
+     }[m
+[36m@@ -36,412 +52,363 @@[m [mfunction parseCsv(text: string): string[][] {[m
+       inQuotes = true;[m
+       continue;[m
+     }[m
+[32m+[m
+     if (ch === ',') {[m
+[31m-      row.push(cell);[m
+[31m-      cell = '';[m
+[32m+[m[32m      row.push(field);[m
+[32m+[m[32m      field = '';[m
+       continue;[m
+     }[m
+[31m-    if (ch === '\r') continue;[m
+[32m+[m
+     if (ch === '\n') {[m
+[31m-      row.push(cell);[m
+[32m+[m[32m      if (field.endsWith('\r')) field = field.slice(0, -1);[m
+[32m+[m[32m      row.push(field);[m
+       rows.push(row);[m
+       row = [];[m
+[31m-      cell = '';[m
+[32m+[m[32m      field = '';[m
+       continue;[m
+     }[m
+[31m-    cell += ch;[m
+[32m+[m
+[32m+[m[32m    field += ch;[m
+   }[m
+[31m-  if (cell.length || row.length) {[m
+[31m-    row.push(cell);[m
+[32m+[m
+[32m+[m[32m  if (field.length || row.length) {[m
+[32m+[m[32m    if (field.endsWith('\r')) field = field.slice(0, -1);[m
+[32m+[m[32m    row.push(field);[m
+     rows.push(row);[m
+   }[m
+[32m+[m
+[32m+[m[32m  while (rows.length && rows[rows.length - 1].every((c) => (c ?? '').trim() === '')) rows.pop();[m
+   return rows;[m
+ }[m
+ [m
+[31m-function toIsoDate(dateS: string): string | null {[m
+[31m-  // "2026.2.1" -> "2026-02-01"[m
+[31m-  const s = (dateS ?? '').trim();[m
+[31m-  if (!s) return null;[m
+[31m-  const parts = s.split('.');[m
+[31m-  if (parts.length !== 3) return null;[m
+[31m-  const y = parts[0].padStart(4, '0');[m
+[31m-  const m = parts[1].padStart(2, '0');[m
+[31m-  const d = parts[2].padStart(2, '0');[m
+[31m-  return `${y}-${m}-${d}`;[m
+[32m+[m[32mfunction toInt(s: string): number | null {[m
+[32m+[m[32m  const t = (s ?? '').toString().trim();[m
+[32m+[m[32m  if (!t) return null;[m
+[32m+[m[32m  const n = Number(t);[m
+[32m+[m[32m  return Number.isFinite(n) ? Math.trunc(n) : null;[m
+ }[m
+ [m
+[31m-function toInt(v: string): number | null {[m
+[31m-  const s = (v ?? '').toString().replace(/[^\d]/g, '');[m
+[31m-  if (!s) return null;[m
+[31m-  const n = parseInt(s, 10);[m
+[31m-  return Number.isFinite(n) ? n : null;[m
+[32m+[m[32mfunction normalizeDate(s: string): string | null {[m
+[32m+[m[32m  const t = (s ?? '').toString().trim();[m
+[32m+[m[32m  if (!t) return null;[m
+[32m+[m[32m  // accept YYYY-MM-DD or YYYY/MM/DD[m
+[32m+[m[32m  const m = t.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);[m
+[32m+[m[32m  if (!m) return null;[m
+[32m+[m[32m  const yyyy = m[1];[m
+[32m+[m[32m  const mm = m[2].padStart(2, '0');[m
+[32m+[m[32m  const dd = m[3].padStart(2, '0');[m
+[32m+[m[32m  return `${yyyy}-${mm}-${dd}`;[m
+ }[m
+ [m
+ export default function ImportPage() {[m
+[31m-  const [fileName, setFileName] = useState('');[m
+[31m-  const [rows, setRows] = useState<Record<string, string>[]>([]);[m
+[31m-  const [status, setStatus] = useState('');[m
+[32m+[m[32m  const [userEmail, setUserEmail] = useState<string | null>(null);[m
+[32m+[m
+[32m+[m[32m  const [status, setStatus] = useState<string>('');[m
+   const [busy, setBusy] = useState(false);[m
+ [m
+[31m-  const preview = useMemo(() => rows.slice(0, 5), [rows]);[m
+[32m+[m[32m  const [fileName, setFileName] = useState<string>('未選択');[m
+[32m+[m[32m  const [csvRows, setCsvRows] = useState<CsvRow[]>([]);[m
+[32m+[m[32m  const [headers, setHeaders] = useState<string[]>([]);[m
+ [m
+[31m-  async function onPickFile(file: File | null) {[m
+[31m-    setStatus('');[m
+[31m-    setRows([]);[m
+[31m-    if (!file) {[m
+[31m-      setFileName('');[m
+[31m-      return;[m
+[31m-    }[m
+[31m-    setFileName(file.name);[m
+[32m+[m[32m  useEffect(() => {[m
+[32m+[m[32m    (async () => {[m
+[32m+[m[32m      const { data } = await supabase.auth.getSession();[m
+[32m+[m[32m      setUserEmail(data.session?.user?.email ?? null);[m
+[32m+[m[32m    })();[m
+[32m+[m[32m  }, []);[m
+ [m
+[31m-    // Shift-JIS蜆ｪ蜈医〒隱ｭ繧[m
+[32m+[m[32m  const preview = useMemo(() => csvRows.slice(0, 5), [csvRows]);[m
+[32m+[m
+[32m+[m[32m  async function readFileAsText(file: File): Promise<string> {[m
+     const buf = await file.arrayBuffer();[m
+[31m-    let text = '';[m
+[32m+[m[32m    // Chrome/Edge supports 'shift-jis'. If unavailable, fallback to utf-8.[m
+     try {[m
+[31m-      text = new TextDecoder('shift-jis').decode(buf);[m
+[32m+[m[32m      return new TextDecoder('shift-jis').decode(buf);[m
+     } catch {[m
+[31m-      text = new TextDecoder('utf-8').decode(buf);[m
+[32m+[m[32m      return new TextDecoder('utf-8').decode(buf);[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  async function onPickFile(f: File | null) {[m
+[32m+[m[32m    setStatus('');[m
+[32m+[m[32m    setCsvRows([]);[m
+[32m+[m[32m    setHeaders([]);[m
+[32m+[m[32m    if (!f) {[m
+[32m+[m[32m      setFileName('未選択');[m
+[32m+[m[32m      return;[m
+     }[m
+[32m+[m[32m    setFileName(f.name);[m
+ [m
+[32m+[m[32m    const text = await readFileAsText(f);[m
+     const table = parseCsv(text);[m
+[32m+[m
+     if (table.length < 2) {[m
+[31m-      setStatus('NG: CSV縺檎ｩｺ縺ｧ縺・);[m
+[32m+[m[32m      setStatus('NG: CSVの行数が足りません（ヘッダ＋1行以上必要）');[m
+       return;[m
+     }[m
+ [m
+[31m-    const header = table[0].map((s) => (s ?? '').trim());[m
+[31m-    const data = table.slice(1).filter((r) => r.some((c) => (c ?? '').trim() !== ''));[m
+[31m-[m
+[31m-    // 蠢・医・繝・ム讀懈渊・井ｸ崎ｶｳ縺ｪ繧牙●豁｢・・[m
+[31m-    const requiredHeaders = [[m
+[31m-      '繝ｬ繝ｼ繧ｹID(譁ｰ)',[m
+[31m-      '譌･莉牢',[m
+[31m-      '蝣ｴ謇',[m
+[31m-      '・ｲ',[m
+[31m-      '繝ｬ繝ｼ繧ｹ蜷・,[m
+[31m-      '闃昴ム',[m
+[31m-      '霍晞屬',[m
+[31m-      '繧ｳ繝ｼ繧ｹ蛹ｺ蛻・,[m
+[31m-      '譫逡ｪ',[m
+[31m-      '鬥ｬ逡ｪ',[m
+[31m-      '陦邨ｱ逋ｻ骭ｲ逡ｪ蜿ｷ',[m
+[31m-      '鬥ｬ蜷・,[m
+[31m-      '鬥ｬ蜊ｰ8',[m
+[31m-      '繝ｬ繝ｼ繧ｹ繧ｳ繝｡繝ｳ繝・,[m
+[31m-      '邨先棡繧ｳ繝｡繝ｳ繝・,[m
+[31m-    ];[m
+[31m-    const missing = requiredHeaders.filter((k) => !header.includes(k));[m
+[32m+[m[32m    const hdr = table[0].map((s) => (s ?? '').toString().trim());[m
+[32m+[m[32m    setHeaders(hdr);[m
+[32m+[m
+[32m+[m[32m    const missing = REQUIRED_HEADERS.filter((h) => !hdr.includes(h));[m
+     if (missing.length) {[m
+[31m-      setStatus(`NG: CSV繝倥ャ繝荳崎ｶｳ: ${missing.join(', ')}`);[m
+[31m-      setRows([]);[m
+[32m+[m[32m      setStatus(`NG: 必須ヘッダが不足しています: ${missing.join(', ')}`);[m
+       return;[m
+     }[m
+ [m
+[31m-    const mapped: Record<string, string>[] = data.map((r) => {[m
+[31m-      const obj: Record<string, string> = {};[m
+[31m-      for (let i = 0; i < header.length; i++) obj[header[i]] = (r[i] ?? '').trim();[m
+[32m+[m[32m    const data = table[m
+[32m+[m[32m      .slice(1)[m
+[32m+[m[32m      .filter((r) => r.some((c) => (c ?? '').toString().trim() !== ''));[m
+[32m+[m
+[32m+[m[32m    const rows: CsvRow[] = data.map((r) => {[m
+[32m+[m[32m      const obj: CsvRow = {};[m
+[32m+[m[32m      hdr.forEach((h, idx) => {[m
+[32m+[m[32m        obj[h] = (r[idx] ?? '').toString();[m
+[32m+[m[32m      });[m
+       return obj;[m
+     });[m
+ [m
+[31m-    setRows(mapped);[m
+[31m-    setStatus(`OK: 隱ｭ縺ｿ霎ｼ縺ｿ ${mapped.length} 陦形);[m
+[32m+[m[32m    setCsvRows(rows);[m
+[32m+[m[32m    setStatus(`OK: 読み込み行数: ${rows.length}`);[m
+   }[m
+ [m
+[31m-  async function doImport() {[m
+[31m-    setStatus('');[m
+[32m+[m[32m  async function runImport() {[m
+[32m+[m[32m    if (busy) return;[m
+[32m+[m[32m    if (!csvRows.length) {[m
+[32m+[m[32m      setStatus('NG: CSVを選択してください');[m
+[32m+[m[32m      return;[m
+[32m+[m[32m    }[m
+[32m+[m
+     setBusy(true);[m
+[32m+[m[32m    setStatus('');[m
+ [m
+[31m-    try {[m
+[31m-      const { data: sess, error: sErr } = await supabase.auth.getSession();[m
+[31m-      if (sErr) throw sErr;[m
+[31m-      const uid = sess.session?.user?.id;[m
+[31m-      if (!uid) {[m
+[31m-        setStatus('NG: 繝ｭ繧ｰ繧､繝ｳ縺励※縺上□縺輔＞');[m
+[31m-        return;[m
+[32m+[m[32m    const racesMap = new Map<string, any>();[m
+[32m+[m[32m    const horsesMap = new Map<string, any>();[m
+[32m+[m[32m    const entriesMap = new Map<string, any>();[m
+[32m+[m[32m    const memos: any[] = [];[m
+[32m+[m
+[32m+[m[32m    for (const r of csvRows) {[m
+[32m+[m[32m      const raceId = (r['レースID(新)'] ?? '').trim();[m
+[32m+[m[32m      const raceDate = normalizeDate(r['日付S']);[m
+[32m+[m[32m      const place = (r['場所'] ?? '').trim() || null;[m
+[32m+[m[32m      const raceNo = toInt(r['Ｒ']);[m
+[32m+[m[32m      const raceName = (r['レース名'] ?? '').trim() || null;[m
+[32m+[m[32m      const surface = (r['芝ダ'] ?? '').trim() || null;[m
+[32m+[m[32m      const distanceM = toInt(r['距離']);[m
+[32m+[m[32m      const waku = toInt(r['枠番']);[m
+[32m+[m[32m      const umaban = toInt(r['馬番']);[m
+[32m+[m[32m      const horseName = (r['馬名'] ?? '').trim() || null;[m
+[32m+[m[32m      const horseId = (r['血統登録番号'] ?? '').trim();[m
+[32m+[m
+[32m+[m[32m      if (!raceId) continue;[m
+[32m+[m[32m      if (!horseId) continue;[m
+[32m+[m
+[32m+[m[32m      if (!racesMap.has(raceId)) {[m
+[32m+[m[32m        racesMap.set(raceId, {[m
+[32m+[m[32m          race_id: raceId,[m
+[32m+[m[32m          race_date: raceDate,[m
+[32m+[m[32m          place,[m
+[32m+[m[32m          race_no: raceNo,[m
+[32m+[m[32m          race_name: raceName,[m
+[32m+[m[32m          surface,[m
+[32m+[m[32m          distance_m: distanceM,[m
+[32m+[m[32m        });[m
+       }[m
+ [m
+[31m-      // 蠢・亥､繝√ぉ繝・け・・ace_id / horse_id・俄ｦ1陦後〒繧よｬ謳阪′縺ゅｌ縺ｰ蛛懈ｭ｢[m
+[31m-      const bad: { idx: number; reason: string; race_id: string; horse_id: string; horse_name: string }[] = [];[m
+[31m-      rows.forEach((h, i) => {[m
+[31m-        const race_id = (h['繝ｬ繝ｼ繧ｹID(譁ｰ)'] ?? '').trim();[m
+[31m-        const horse_id = (h['陦邨ｱ逋ｻ骭ｲ逡ｪ蜿ｷ'] ?? '').trim();[m
+[31m-        const horse_name = (h['鬥ｬ蜷・] ?? '').trim();[m
+[31m-        if (!race_id) bad.push({ idx: i + 2, reason: '繝ｬ繝ｼ繧ｹID(譁ｰ)縺檎ｩｺ', race_id, horse_id, horse_name });[m
+[31m-        else if (!horse_id) bad.push({ idx: i + 2, reason: '陦邨ｱ逋ｻ骭ｲ逡ｪ蜿ｷ縺檎ｩｺ', race_id, horse_id, horse_name });[m
+[31m-      });[m
+[31m-[m
+[31m-      if (bad.length) {[m
+[31m-        const sample = bad[m
+[31m-          .slice(0, 5)[m
+[31m-          .map([m
+[31m-            (e) =>[m
+[31m-              `L${e.idx}:${e.reason}・・ace_id=${e.race_id || '-'} horse_id=${e.horse_id || '-'} 鬥ｬ蜷・${e.horse_name || '-'}・荏[m
+[31m-          )[m
+[31m-          .join(' / ');[m
+[31m-        setStatus(`NG: 蠢・磯・岼谺謳・${bad.length}陦後・{sample}`);[m
+[31m-        return;[m
+[32m+[m[32m      if (!horsesMap.has(horseId)) {[m
+[32m+[m[32m        horsesMap.set(horseId, {[m
+[32m+[m[32m          horse_id: horseId,[m
+[32m+[m[32m          horse_name: horseName,[m
+[32m+[m[32m        });[m
+       }[m
+ [m
+[31m-      // races/horses/entries 逕ｨ縺ｫ驥崎､・賜髯､[m
+[31m-      const raceMap = new Map<string, any>();[m
+[31m-      const horseMap = new Map<string, any>();[m
+[31m-      const entryMap = new Map<string, any>();[m
+[31m-[m
+[31m-      // memos・亥・陦鯉ｼ・[m
+[31m-      const memosPayload = rows.map((h) => {[m
+[31m-        const race_id = (h['繝ｬ繝ｼ繧ｹID(譁ｰ)'] ?? '').trim();[m
+[31m-        const race_date = toIsoDate(h['譌･莉牢'] ?? '');[m
+[31m-        const place = (h['蝣ｴ謇'] ?? '').trim();[m
+[31m-        const race_no = toInt(h['・ｲ'] ?? '');[m
+[31m-        const race_name = (h['繝ｬ繝ｼ繧ｹ蜷・] ?? '').trim();[m
+[31m-        const surface = (h['闃昴ム'] ?? '').trim();[m
+[31m-        const distance_m = toInt(h['霍晞屬'] ?? '');[m
+[31m-        const course_kbn = (h['繧ｳ繝ｼ繧ｹ蛹ｺ蛻・] ?? '').trim();[m
+[31m-[m
+[31m-        const horse_id = (h['陦邨ｱ逋ｻ骭ｲ逡ｪ蜿ｷ'] ?? '').trim();[m
+[31m-        const horse_name = (h['鬥ｬ蜷・] ?? '').trim();[m
+[31m-[m
+[31m-        const waku = toInt(h['譫逡ｪ'] ?? '');[m
+[31m-        const umaban = toInt(h['鬥ｬ逡ｪ'] ?? '');[m
+[31m-[m
+[31m-        const uma_mark8 = (h['鬥ｬ蜊ｰ8'] ?? '').trim();[m
+[31m-        const race_comment = (h['繝ｬ繝ｼ繧ｹ繧ｳ繝｡繝ｳ繝・] ?? '').trim();[m
+[31m-        const result_comment = (h['邨先棡繧ｳ繝｡繝ｳ繝・] ?? '').trim();[m
+[31m-[m
+[31m-        if (race_id && !raceMap.has(race_id)) {[m
+[31m-          raceMap.set(race_id, {[m
+[31m-            race_id,[m
+[31m-            race_date: race_date,[m
+[31m-            place: place || null,[m
+[31m-            race_no: race_no,[m
+[31m-            race_name: race_name || null,[m
+[31m-            surface: surface || null,[m
+[31m-            distance_m: distance_m,[m
+[31m-            course_kbn: course_kbn || null,[m
+[31m-          });[m
+[31m-        }[m
+[31m-[m
+[31m-        if (horse_id && !horseMap.has(horse_id)) {[m
+[31m-          horseMap.set(horse_id, {[m
+[31m-            horse_id,[m
+[31m-            horse_name: horse_name || '(荳肴・)',[m
+[31m-          });[m
+[31m-        }[m
+[31m-[m
+[31m-        if (race_id && horse_id) {[m
+[31m-          const key = `${race_id}__${horse_id}`;[m
+[31m-          if (!entryMap.has(key)) {[m
+[31m-            entryMap.set(key, { race_id, horse_id, waku, umaban });[m
+[31m-          }[m
+[31m-        }[m
+[31m-[m
+[31m-        return {[m
+[31m-          user_id: uid,[m
+[31m-          author_name: sess.session?.user?.email ?? null,[m
+[31m-          updated_by: uid,[m
+[31m-          updated_by_name: sess.session?.user?.email ?? null,[m
+[31m-[m
+[31m-          race_id: race_id || null,[m
+[31m-          horse_id: horse_id || null,[m
+[31m-          horse_name: horse_name || null,[m
+[31m-          uma_mark8: uma_mark8 || null,[m
+[31m-          race_comment: race_comment || null,[m
+[31m-          result_comment: result_comment || null,[m
+[31m-        };[m
+[31m-      });[m
+[32m+[m[32m      const ek = `${raceId}__${horseId}`;[m
+[32m+[m[32m      if (!entriesMap.has(ek)) {[m
+[32m+[m[32m        entriesMap.set(ek, {[m
+[32m+[m[32m          race_id: raceId,[m
+[32m+[m[32m          horse_id: horseId,[m
+[32m+[m[32m          waku,[m
+[32m+[m[32m          umaban,[m
+[32m+[m[32m        });[m
+[32m+[m[32m      }[m
+ [m
+[31m-      const racesPayload = Array.from(raceMap.values());[m
+[31m-      const horsesPayload = Array.from(horseMap.values());[m
+[31m-      const entriesPayload = Array.from(entryMap.values());[m
+[32m+[m[32m      const mark8 = (r['馬印8'] ?? '').trim() || null;[m
+[32m+[m[32m      const raceComment = (r['レースコメント'] ?? '').trim() || null;[m
+[32m+[m[32m      const resultComment = (r['結果コメント'] ?? '').trim() || null;[m
+[32m+[m
+[32m+[m[32m      if (mark8 || raceComment || resultComment) {[m
+[32m+[m[32m        memos.push({[m
+[32m+[m[32m          race_id: raceId,[m
+[32m+[m[32m          horse_id: horseId,[m
+[32m+[m[32m          uma_mark8: mark8,[m
+[32m+[m[32m          race_comment: raceComment,[m
+[32m+[m[32m          result_comment: resultComment,[m
+[32m+[m[32m          author_name: userEmail,[m
+[32m+[m[32m        });[m
+[32m+[m[32m      }[m
+[32m+[m[32m    }[m
+ [m
+[31m-      const batchSize = 200;[m
+[32m+[m[32m    const races = Array.from(racesMap.values());[m
+[32m+[m[32m    const horses = Array.from(horsesMap.values());[m
+[32m+[m[32m    const entries = Array.from(entriesMap.values());[m
+ [m
+[31m-      // races 竊・horses 竊・entries 竊・memos 縺ｮ鬆・〒謚募・・亥､夜Κ繧ｭ繝ｼ蟇ｾ遲厄ｼ・[m
+[31m-      let done = 0;[m
+[31m-      for (let i = 0; i < racesPayload.length; i += batchSize) {[m
+[31m-        const chunk = racesPayload.slice(i, i + batchSize);[m
+[31m-        const { error } = await supabase.from('races').upsert(chunk, { onConflict: 'race_id' });[m
+[31m-        if (error) {[m
+[31m-          setStatus(`NG: races upsert: ${error.message}・・{i + 1}陦檎岼縺ゅ◆繧奇ｼ荏);[m
+[31m-          return;[m
+[31m-        }[m
+[31m-        done += chunk.length;[m
+[31m-        setStatus(`騾ｲ陦御ｸｭ: races ${done}/${racesPayload.length}`);[m
+[32m+[m[32m    try {[m
+[32m+[m[32m      if (races.length) {[m
+[32m+[m[32m        const { error } = await (supabase.from('races') as any).upsert(races, { onConflict: 'race_id' });[m
+[32m+[m[32m        if (error) throw new Error(`races upsert: ${error.message}`);[m
+       }[m
+[31m-[m
+[31m-      done = 0;[m
+[31m-      for (let i = 0; i < horsesPayload.length; i += batchSize) {[m
+[31m-        const chunk = horsesPayload.slice(i, i + batchSize);[m
+[31m-        const { error } = await supabase.from('horses').upsert(chunk, { onConflict: 'horse_id' });[m
+[31m-        if (error) {[m
+[31m-          setStatus(`NG: horses upsert: ${error.message}・・{i + 1}陦檎岼縺ゅ◆繧奇ｼ荏);[m
+[31m-          return;[m
+[31m-        }[m
+[31m-        done += chunk.length;[m
+[31m-        setStatus(`騾ｲ陦御ｸｭ: horses ${done}/${horsesPayload.length}`);[m
+[32m+[m[32m      if (horses.length) {[m
+[32m+[m[32m        const { error } = await (supabase.from('horses') as any).upsert(horses, { onConflict: 'horse_id' });[m
+[32m+[m[32m        if (error) throw new Error(`horses upsert: ${error.message}`);[m
+       }[m
+[31m-[m
+[31m-      done = 0;[m
+[31m-      for (let i = 0; i < entriesPayload.length; i += batchSize) {[m
+[31m-        const chunk = entriesPayload.slice(i, i + batchSize);[m
+[31m-        const { error } = await supabase.from('entries').upsert(chunk, { onConflict: 'race_id,horse_id' });[m
+[31m-        if (error) {[m
+[31m-          setStatus(`NG: entries upsert: ${error.message}・・{i + 1}陦檎岼縺ゅ◆繧奇ｼ荏);[m
+[31m-          return;[m
+[31m-        }[m
+[31m-        done += chunk.length;[m
+[31m-        setStatus(`騾ｲ陦御ｸｭ: entries ${done}/${entriesPayload.length}`);[m
+[32m+[m[32m      if (entries.length) {[m
+[32m+[m[32m        const { error } = await (supabase.from('entries') as any).upsert(entries, { onConflict: 'race_id,horse_id' });[m
+[32m+[m[32m        if (error) throw new Error(`entries upsert: ${error.message}`);[m
+       }[m
+[31m-[m
+[31m-      done = 0;[m
+[31m-      for (let i = 0; i < memosPayload.length; i += batchSize) {[m
+[31m-        const chunk = memosPayload.slice(i, i + batchSize);[m
+[31m-        const { error } = await supabase.from('memos').upsert(chunk, {[m
+[31m-          onConflict: 'race_id,horse_id,user_id',[m
+[31m-          ignoreDuplicates: false, // 荳頑嶌縺・[m
+[31m-        });[m
+[31m-        if (error) {[m
+[31m-          setStatus(`NG: memos upsert: ${error.message}・・{i + 1}陦檎岼縺ゅ◆繧奇ｼ荏);[m
+[31m-          return;[m
+[31m-        }[m
+[31m-        done += chunk.length;[m
+[31m-        setStatus(`騾ｲ陦御ｸｭ: memos ${done}/${memosPayload.length}`);[m
+[32m+[m[32m      if (memos.length) {[m
+[32m+[m[32m        const { error } = await (supabase.from('memos') as any).insert(memos);[m
+[32m+[m[32m        if (error) throw new Error(`memos insert: ${error.message}`);[m
+       }[m
+ [m
+       setStatus([m
+[31m-        `OK: 蜿悶ｊ霎ｼ縺ｿ螳御ｺ・ｼ・aces:${racesPayload.length}, horses:${horsesPayload.length}, entries:${entriesPayload.length}, memos:${memosPayload.length}・荏[m
+[32m+[m[32m        `OK: 取込完了（races=${races.length}, horses=${horses.length}, entries=${entries.length}, memos=${memos.length}）`[m
+       );[m
+[31m-    } catch (e: any) {[m
+[31m-      setStatus(`NG: ${e?.message ?? String(e)}`);[m
+[32m+[m[32m    } catch (err: any) {[m
+[32m+[m[32m      setStatus(`NG: ${err?.message ?? String(err)}`);[m
+     } finally {[m
+       setBusy(false);[m
+     }[m
+   }[m
+ [m
+   return ([m
+[31m-    <main style={{ padding: 24, fontFamily: 'sans-serif', maxWidth: 860 }}>[m
+[31m-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>[m
+[31m-        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>CSV蜿悶ｊ霎ｼ縺ｿ</h1>[m
+[32m+[m[32m    <div style={{ padding: 24, maxWidth: 980, margin: '0 auto' }}>[m
+[32m+[m[32m      <div[m
+[32m+[m[32m        style={{[m
+[32m+[m[32m          display: 'flex',[m
+[32m+[m[32m          justifyContent: 'space-between',[m
+[32m+[m[32m          alignItems: 'center',[m
+[32m+[m[32m          gap: 12,[m
+[32m+[m[32m          flexWrap: 'wrap',[m
+[32m+[m[32m        }}[m
+[32m+[m[32m      >[m
+[32m+[m[32m        <h1 style={{ fontSize: 28, margin: 0 }}>CSV取り込み</h1>[m
+         <Link[m
+           href="/"[m
+           style={{[m
+[31m-            padding: '8px 12px',[m
+[31m-            border: '1px solid #555',[m
+[31m-            borderRadius: 6,[m
+[32m+[m[32m            border: '1px solid #333',[m
+[32m+[m[32m            padding: '10px 14px',[m
+[32m+[m[32m            borderRadius: 8,[m
+             textDecoration: 'none',[m
+             color: '#111',[m
+           }}[m
+         >[m
+[31m-          竊・謌ｻ繧・[m
+[32m+[m[32m          ← 戻る[m
+         </Link>[m
+       </div>[m
+ [m
+[31m-      {/* 笘・ｿｽ蜉・壽ｳｨ諢乗枚・医ち繧､繝医Ν縺ｨ繝輔ぃ繧､繝ｫ驕ｸ謚槭・髢難ｼ・*/}[m
+[31m-      <div style={{ marginTop: 12, padding: 12, border: '1px solid #bbb', borderRadius: 8, background: '#fff' }}>[m
+[31m-        <div style={{ fontWeight: 700, marginBottom: 6 }}>窶ｻ蜿冶ｾｼ繝輔ぃ繧､繝ｫ豕ｨ諢・/div>[m
+[31m-        <div style={{ fontSize: 13, lineHeight: 1.6 }}>[m
+[31m-          竭A蛻励・繝倥ャ繝蜷阪・縲後Ξ繝ｼ繧ｹID(譁ｰ)縲・br />[m
+[31m-          竭｡繝ｬ繝ｼ繧ｹID縺ｯ鬥ｬ逡ｪ辟｡縺励・繧ゅ・繧剃ｽｿ逕ｨ(鬥ｬ逡ｪ繧堤､ｺ縺呎忰蟆ｾ縺ｮ2譯√′荳崎ｦ・<br />[m
+[31m-          竭｢F蛻励・繝倥ャ繝蜷阪・縲瑚茅繝縲・蜃ｺ襍ｰ鬥ｬ蛻・梵縺九ｉ蜃ｺ縺吶→闃昴・繝縺ｫ縺ｪ繧・[m
+[32m+[m[32m      <div style={{ marginTop: 16, border: '1px solid #bbb', borderRadius: 10, padding: 14, background: '#fff' }}>[m
+[32m+[m[32m        <div style={{ fontWeight: 800, marginBottom: 8 }}>※ 取込ファイル注意</div>[m
+[32m+[m[32m        <div style={{ lineHeight: 1.8 }}>[m
+[32m+[m[32m          <div>①A列のヘッダ名は「レースID(新)」</div>[m
+[32m+[m[32m          <div>②レースIDは馬番無しのものを使用（馬番を示す末尾の2桁が不要）</div>[m
+[32m+[m[32m          <div>③F列のヘッダ名は「芝ダ」（出走馬分析から出すと芝・ダになる）</div>[m
+         </div>[m
+       </div>[m
+ [m
+[31m-      <section style={{ marginTop: 16, border: '1px solid #444', padding: 12, borderRadius: 8 }}>[m
+[31m-        <div style={{ fontWeight: 700 }}>CSV繝輔ぃ繧､繝ｫ</div>[m
+[32m+[m[32m      <div style={{ marginTop: 18, border: '1px solid #bbb', borderRadius: 10, padding: 14, background: '#fff' }}>[m
+[32m+[m[32m        <div style={{ fontWeight: 800, marginBottom: 10, fontSize: 18 }}>CSVファイル</div>[m
+[32m+[m
+[32m+[m[32m        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>[m
+[32m+[m[32m          <label style={{ display: 'inline-block' }}>[m
+[32m+[m[32m            <input[m
+[32m+[m[32m              type="file"[m
+[32m+[m[32m              accept=".csv,text/csv"[m
+[32m+[m[32m              style={{ display: 'none' }}[m
+[32m+[m[32m              onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}[m
+[32m+[m[32m            />[m
+[32m+[m[32m            <span[m
+[32m+[m[32m              style={{[m
+[32m+[m[32m                display: 'inline-block',[m
+[32m+[m[32m                border: '1px solid #333',[m
+[32m+[m[32m                padding: '10px 14px',[m
+[32m+[m[32m                borderRadius: 8,[m
+[32m+[m[32m                cursor: 'pointer',[m
+[32m+[m[32m              }}[m
+[32m+[m[32m            >[m
+[32m+[m[32m              ファイルを選択[m
+[32m+[m[32m            </span>[m
+[32m+[m[32m          </label>[m
+[32m+[m
+[32m+[m[32m          <div style={{ color: '#333' }}>選択中: {fileName}</div>[m
+[32m+[m
+[32m+[m[32m          <button[m
+[32m+[m[32m            type="button"[m
+[32m+[m[32m            onClick={runImport}[m
+[32m+[m[32m            disabled={busy || csvRows.length === 0}[m
+[32m+[m[32m            style={{[m
+[32m+[m[32m              border: '1px solid #999',[m
+[32m+[m[32m              padding: '10px 14px',[m
+[32m+[m[32m              borderRadius: 8,[m
+[32m+[m[32m              cursor: busy || csvRows.length === 0 ? 'not-allowed' : 'pointer',[m
+[32m+[m[32m              opacity: busy || csvRows.length === 0 ? 0.5 : 1,[m
+[32m+[m[32m              marginLeft: 8,[m
+[32m+[m[32m            }}[m
+[32m+[m[32m          >[m
+[32m+[m[32m            取り込み実行[m
+[32m+[m[32m          </button>[m
+[32m+[m[32m        </div>[m
+ [m
+[31m-        <input[m
+[31m-          id="csvFileInput"[m
+[31m-          type="file"[m
+[31m-          accept=".csv,text/csv"[m
+[31m-          onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}[m
+[31m-          disabled={busy}[m
+[31m-          style={{ display: 'none' }}[m
+[31m-        />[m
+[32m+[m[32m        <div style={{ marginTop: 14, fontWeight: 800, fontSize: 18 }}>プレビュー（先頭5行）</div>[m
+[32m+[m[32m        <div style={{ marginTop: 8 }}>読み込み行数: {csvRows.length}</div>[m
+ [m
+[31m-        <label[m
+[31m-          htmlFor="csvFileInput"[m
+[32m+[m[32m        <div[m
+           style={{[m
+[31m-            display: 'inline-block',[m
+[31m-            marginTop: 8,[m
+[31m-            padding: '8px 12px',[m
+[31m-            border: '1px solid #555',[m
+[31m-            borderRadius: 6,[m
+[31m-            cursor: busy ? 'not-allowed' : 'pointer',[m
+[31m-            opacity: busy ? 0.6 : 1,[m
+[31m-            background: '#fff',[m
+[31m-            userSelect: 'none',[m
+[32m+[m[32m            marginTop: 10,[m
+[32m+[m[32m            border: '1px solid #ccc',[m
+[32m+[m[32m            borderRadius: 10,[m
+[32m+[m[32m            padding: 12,[m
+[32m+[m[32m            minHeight: 44,[m
+[32m+[m[32m            background: '#fafafa',[m
+           }}[m
+         >[m
+[31m-          繝輔ぃ繧､繝ｫ繧帝∈謚・[m
+[31m-        </label>[m
+[31m-          [m
+[31m-[m
+[31m-        <div style={{ marginTop: 8, opacity: 0.8 }}>驕ｸ謚樔ｸｭ: {fileName ? fileName : '(譛ｪ驕ｸ謚・'}</div>[m
+[32m+[m[32m          {status || 'CSVを選択してください'}[m
+[32m+[m[32m        </div>[m
+ [m
+[31m-        <button[m
+[31m-          onClick={doImport}[m
+[31m-          disabled={busy || rows.length === 0}[m
+[31m-          style={{[m
+[31m-            marginTop: 12,[m
+[31m-            padding: '8px 12px',[m
+[31m-            border: '1px solid #555',[m
+[31m-            borderRadius: 6,[m
+[31m-            opacity: busy || rows.length === 0 ? 0.6 : 1,[m
+[31m-            cursor: busy || rows.length === 0 ? 'not-allowed' : 'pointer',[m
+[31m-          }}[m
+[31m-        >[m
+[31m-          {busy ? '蜿悶ｊ霎ｼ縺ｿ荳ｭ...' : '蜿悶ｊ霎ｼ縺ｿ螳溯｡・}[m
+[31m-        </button>[m
+[31m-[m
+[31m-        {status && <div style={{ marginTop: 12 }}>{status}</div>}[m
+[31m-      </section>[m
+[31m-[m
+[31m-      <section style={{ marginTop: 16 }}>[m
+[31m-        <h2 style={{ fontSize: 16, fontWeight: 700 }}>繝励Ξ繝薙Η繝ｼ・亥・鬆ｭ5陦鯉ｼ・/h2>[m
+[31m-        <div style={{ marginTop: 8, opacity: 0.85 }}>隱ｭ縺ｿ霎ｼ縺ｿ陦梧焚: {rows.length}</div>[m
+[31m-[m
+[31m-        <div style={{ marginTop: 8, border: '1px solid #333', borderRadius: 8, overflow: 'auto' }}>[m
+[31m-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>[m
+[31m-            <thead>[m
+[31m-              <tr>[m
+[31m-                {Object.keys(preview[0] ?? {})[m
+[31m-                  .slice(0, 8)[m
+[31m-                  .map((k) => ([m
+[32m+[m[32m        {preview.length > 0 ? ([m
+[32m+[m[32m          <div style={{ marginTop: 12, overflowX: 'auto' }}>[m
+[32m+[m[32m            <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 900, background: '#fff' }}>[m
+[32m+[m[32m              <thead>[m
+[32m+[m[32m                <tr>[m
+[32m+[m[32m                  {headers.map((h) => ([m
+                     <th[m
+[31m-                      key={k}[m
+[31m-                      style={{ textAlign: 'left', padding: 8, borderBottom: '1px solid #333', fontSize: 12 }}[m
+[32m+[m[32m                      key={h}[m
+[32m+[m[32m                      style={{[m
+[32m+[m[32m                        border: '1px solid #ddd',[m
+[32m+[m[32m                        padding: '6px 8px',[m
+[32m+[m[32m                        background: '#f5f5f5',[m
+[32m+[m[32m                        whiteSpace: 'nowrap',[m
+[32m+[m[32m                      }}[m
+                     >[m
+[31m-                      {k}[m
+[32m+[m[32m                      {h}[m
+                     </th>[m
+                   ))}[m
+[31m-              </tr>[m
+[31m-            </thead>[m
+[31m-            <tbody>[m
+[31m-              {preview.map((r, idx) => ([m
+[31m-                <tr key={idx}>[m
+[31m-                  {Object.keys(preview[0] ?? {})[m
+[31m-                    .slice(0, 8)[m
+[31m-                    .map((k) => ([m
+[31m-                      <td[m
+[31m-                        key={k}[m
+[31m-                        style={{ padding: 8, borderBottom: '1px solid #222', fontSize: 12, opacity: 0.9 }}[m
+[31m-                      >[m
+[31m-                        {r[k]}[m
+[32m+[m[32m                </tr>[m
+[32m+[m[32m              </thead>[m
+[32m+[m[32m              <tbody>[m
+[32m+[m[32m                {preview.map((r, idx) => ([m
+[32m+[m[32m                  <tr key={idx}>[m
+[32m+[m[32m                    {headers.map((h) => ([m
+[32m+[m[32m                      <td key={h} style={{ border: '1px solid #eee', padding: '6px 8px', whiteSpace: 'nowrap' }}>[m
+[32m+[m[32m                        {(r[h] ?? '').toString()}[m
+                       </td>[m
+                     ))}[m
+[31m-                </tr>[m
+[31m-              ))}[m
+[31m-              {rows.length === 0 && ([m
+[31m-                <tr>[m
+[31m-                  <td style={{ padding: 12, opacity: 0.7 }}>CSV繧帝∈謚槭＠縺ｦ縺上□縺輔＞</td>[m
+[31m-                </tr>[m
+[31m-              )}[m
+[31m-            </tbody>[m
+[31m-          </table>[m
+[31m-        </div>[m
+[31m-      </section>[m
+[31m-    </main>[m
+[32m+[m[32m                  </tr>[m
+[32m+[m[32m                ))}[m
+[32m+[m[32m              </tbody>[m
+[32m+[m[32m            </table>[m
+[32m+[m[32m          </div>[m
+[32m+[m[32m        ) : null}[m
+[32m+[m[32m      </div>[m
+[32m+[m[32m    </div>[m
+   );[m
+[31m-}[m
+[31m-[m
+[31m-[m
+[32m+[m[32m}[m
+\ No newline at end of file[m
+[1mdiff --git a/app/import/page.tsx.bak b/app/import/page.tsx.bak[m
+[1mdeleted file mode 100644[m
+[1mindex 398908b..0000000[m
+[1m--- a/app/import/page.tsx.bak[m
+[1m+++ /dev/null[m
+[36m@@ -1,448 +0,0 @@[m
+[31m-﻿'use client';[m
+[31m-[m
+[31m-import { supabase } from '../lib/supabaseClient';[m
+[31m-import { useMemo, useState } from 'react';[m
+[31m-import Link from 'next/link';[m
+[31m-import { createClient } from '@supabase/supabase-js';[m
+[31m-[m
+[31m-const supabase = createClient([m
+[31m-  process.env.NEXT_PUBLIC_SUPABASE_URL!,[m
+[31m-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY![m
+[31m-);[m
+[31m-[m
+[31m-// 繝繝悶Ν繧ｯ繧ｩ繝ｼ繝亥ｯｾ蠢懊・邁｡譏鼎SV繝代・繧ｵ・郁｡悟腰菴搾ｼ・[m
+[31m-function parseCsv(text: string): string[][] {[m
+[31m-  const rows: string[][] = [];[m
+[31m-  let row: string[] = [];[m
+[31m-  let cell = '';[m
+[31m-  let inQuotes = false;[m
+[31m-[m
+[31m-  for (let i = 0; i < text.length; i++) {[m
+[31m-    const ch = text[i];[m
+[31m-[m
+[31m-    if (inQuotes) {[m
+[31m-      if (ch === '"') {[m
+[31m-        const next = text[i + 1];[m
+[31m-        if (next === '"') {[m
+[31m-          cell += '"';[m
+[31m-          i++;[m
+[31m-        } else {[m
+[31m-          inQuotes = false;[m
+[31m-        }[m
+[31m-      } else {[m
+[31m-        cell += ch;[m
+[31m-      }[m
+[31m-      continue;[m
+[31m-    }[m
+[31m-[m
+[31m-    if (ch === '"') {[m
+[31m-      inQuotes = true;[m
+[31m-      continue;[m
+[31m-    }[m
+[31m-    if (ch === ',') {[m
+[31m-      row.push(cell);[m
+[31m-      cell = '';[m
+[31m-      continue;[m
+[31m-    }[m
+[31m-    if (ch === '\r') continue;[m
+[31m-    if (ch === '\n') {[m
+[31m-      row.push(cell);[m
+[31m-      rows.push(row);[m
+[31m-      row = [];[m
+[31m-      cell = '';[m
+[31m-      continue;[m
+[31m-    }[m
+[31m-    cell += ch;[m
+[31m-  }[m
+[31m-  if (cell.length || row.length) {[m
+[31m-    row.push(cell);[m
+[31m-    rows.push(row);[m
+[31m-  }[m
+[31m-  return rows;[m
+[31m-}[m
+[31m-[m
+[31m-function toIsoDate(dateS: string): string | null {[m
+[31m-  // "2026.2.1" -> "2026-02-01"[m
+[31m-  const s = (dateS ?? '').trim();[m
+[31m-  if (!s) return null;[m
+[31m-  const parts = s.split('.');[m
+[31m-  if (parts.length !== 3) return null;[m
+[31m-  const y = parts[0].padStart(4, '0');[m
+[31m-  const m = parts[1].padStart(2, '0');[m
+[31m-  const d = parts[2].padStart(2, '0');[m
+[31m-  return `${y}-${m}-${d}`;[m
+[31m-}[m
+[31m-[m
+[31m-function toInt(v: string): number | null {[m
+[31m-  const s = (v ?? '').toString().replace(/[^\d]/g, '');[m
+[31m-  if (!s) return null;[m
+[31m-  const n = parseInt(s, 10);[m
+[31m-  return Number.isFinite(n) ? n : null;[m
+[31m-}[m
+[31m-[m
+[31m-export default function ImportPage() {[m
+[31m-  const [fileName, setFileName] = useState('');[m
+[31m-  const [rows, setRows] = useState<Record<string, string>[]>([]);[m
+[31m-  const [status, setStatus] = useState('');[m
+[31m-  const [busy, setBusy] = useState(false);[m
+[31m-[m
+[31m-  const preview = useMemo(() => rows.slice(0, 5), [rows]);[m
+[31m-[m
+[31m-  async function onPickFile(file: File | null) {[m
+[31m-    setStatus('');[m
+[31m-    setRows([]);[m
+[31m-    if (!file) {[m
+[31m-      setFileName('');[m
+[31m-      return;[m
+[31m-    }[m
+[31m-    setFileName(file.name);[m
+[31m-[m
+[31m-    // Shift-JIS蜆ｪ蜈医〒隱ｭ繧[m
+[31m-    const buf = await file.arrayBuffer();[m
+[31m-    let text = '';[m
+[31m-    try {[m
+[31m-      text = new TextDecoder('shift-jis').decode(buf);[m
+[31m-    } catch {[m
+[31m-      text = new TextDecoder('utf-8').decode(buf);[m
+[31m-    }[m
+[31m-[m
+[31m-    const table = parseCsv(text);[m
+[31m-    if (table.length < 2) {[m
+[31m-      setStatus('NG: CSV縺檎ｩｺ縺ｧ縺・);[m
+[31m-      return;[m
+[31m-    }[m
+[31m-[m
+[31m-    const header = table[0].map((s) => (s ?? '').trim());[m
+[31m-    const data = table.slice(1).filter((r) => r.some((c) => (c ?? '').trim() !== ''));[m
+[31m-[m
+[31m-    // 蠢・医・繝・ム讀懈渊・井ｸ崎ｶｳ縺ｪ繧牙●豁｢・・[m
+[31m-    const requiredHeaders = [[m
+[31m-      '繝ｬ繝ｼ繧ｹID(譁ｰ)',[m
+[31m-      '譌･莉牢',[m
+[31m-      '蝣ｴ謇',[m
+[31m-      '・ｲ',[m
+[31m-      '繝ｬ繝ｼ繧ｹ蜷・,[m
+[31m-      '闃昴ム',[m
+[31m-      '霍晞屬',[m
+[31m-      '繧ｳ繝ｼ繧ｹ蛹ｺ蛻・,[m
+[31m-      '譫逡ｪ',[m
+[31m-      '鬥ｬ逡ｪ',[m
+[31m-      '陦邨ｱ逋ｻ骭ｲ逡ｪ蜿ｷ',[m
+[31m-      '鬥ｬ蜷・,[m
+[31m-      '鬥ｬ蜊ｰ8',[m
+[31m-      '繝ｬ繝ｼ繧ｹ繧ｳ繝｡繝ｳ繝・,[m
+[31m-      '邨先棡繧ｳ繝｡繝ｳ繝・,[m
+[31m-    ];[m
+[31m-    const missing = requiredHeaders.filter((k) => !header.includes(k));[m
+[31m-    if (missing.length) {[m
+[31m-      setStatus(`NG: CSV繝倥ャ繝荳崎ｶｳ: ${missing.join(', ')}`);[m
+[31m-      setRows([]);[m
+[31m-      return;[m
+[31m-    }[m
+[31m-[m
+[31m-    const mapped: Record<string, string>[] = data.map((r) => {[m
+[31m-      const obj: Record<string, string> = {};[m
+[31m-      for (let i = 0; i < header.length; i++) obj[header[i]] = (r[i] ?? '').trim();[m
+[31m-      return obj;[m
+[31m-    });[m
+[31m-[m
+[31m-    setRows(mapped);[m
+[31m-    setStatus(`OK: 隱ｭ縺ｿ霎ｼ縺ｿ ${mapped.length} 陦形);[m
+[31m-  }[m
+[31m-[m
+[31m-  async function doImport() {[m
+[31m-    setStatus('');[m
+[31m-    setBusy(true);[m
+[31m-[m
+[31m-    try {[m
+[31m-      const { data: sess, error: sErr } = await supabase.auth.getSession();[m
+[31m-      if (sErr) throw sErr;[m
+[31m-      const uid = sess.session?.user?.id;[m
+[31m-      if (!uid) {[m
+[31m-        setStatus('NG: 繝ｭ繧ｰ繧､繝ｳ縺励※縺上□縺輔＞');[m
+[31m-        return;[m
+[31m-      }[m
+[31m-[m
+[31m-      // 蠢・亥､繝√ぉ繝・け・・ace_id / horse_id・俄ｦ1陦後〒繧よｬ謳阪′縺ゅｌ縺ｰ蛛懈ｭ｢[m
+[31m-      const bad: { idx: number; reason: string; race_id: string; horse_id: string; horse_name: string }[] = [];[m
+[31m-      rows.forEach((h, i) => {[m
+[31m-        const race_id = (h['繝ｬ繝ｼ繧ｹID(譁ｰ)'] ?? '').trim();[m
+[31m-        const horse_id = (h['陦邨ｱ逋ｻ骭ｲ逡ｪ蜿ｷ'] ?? '').trim();[m
+[31m-        const horse_name = (h['鬥ｬ蜷・] ?? '').trim();[m
+[31m-        if (!race_id) bad.push({ idx: i + 2, reason: '繝ｬ繝ｼ繧ｹID(譁ｰ)縺檎ｩｺ', race_id, horse_id, horse_name });[m
+[31m-        else if (!horse_id) bad.push({ idx: i + 2, reason: '陦邨ｱ逋ｻ骭ｲ逡ｪ蜿ｷ縺檎ｩｺ', race_id, horse_id, horse_name });[m
+[31m-      });[m
+[31m-[m
+[31m-      if (bad.length) {[m
+[31m-        const sample = bad[m
+[31m-          .slice(0, 5)[m
+[31m-          .map([m
+[31m-            (e) =>[m
+[31m-              `L${e.idx}:${e.reason}・・ace_id=${e.race_id || '-'} horse_id=${e.horse_id || '-'} 鬥ｬ蜷・${e.horse_name || '-'}・荏[m
+[31m-          )[m
+[31m-          .join(' / ');[m
+[31m-        setStatus(`NG: 蠢・磯・岼谺謳・${bad.length}陦後・{sample}`);[m
+[31m-        return;[m
+[31m-      }[m
+[31m-[m
+[31m-      // races/horses/entries 逕ｨ縺ｫ驥崎､・賜髯､[m
+[31m-      const raceMap = new Map<string, any>();[m
+[31m-      const horseMap = new Map<string, any>();[m
+[31m-      const entryMap = new Map<string, any>();[m
+[31m-[m
+[31m-      // memos・亥・陦鯉ｼ・[m
+[31m-      const memosPayload = rows.map((h) => {[m
+[31m-        const race_id = (h['繝ｬ繝ｼ繧ｹID(譁ｰ)'] ?? '').trim();[m
+[31m-        const race_date = toIsoDate(h['譌･莉牢'] ?? '');[m
+[31m-        const place = (h['蝣ｴ謇'] ?? '').trim();[m
+[31m-        const race_no = toInt(h['・ｲ'] ?? '');[m
+[31m-        const race_name = (h['繝ｬ繝ｼ繧ｹ蜷・] ?? '').trim();[m
+[31m-        const surface = (h['闃昴ム'] ?? '').trim();[m
+[31m-        const distance_m = toInt(h['霍晞屬'] ?? '');[m
+[31m-        const course_kbn = (h['繧ｳ繝ｼ繧ｹ蛹ｺ蛻・] ?? '').trim();[m
+[31m-[m
+[31m-        const horse_id = (h['陦邨ｱ逋ｻ骭ｲ逡ｪ蜿ｷ'] ?? '').trim();[m
+[31m-        const horse_name = (h['鬥ｬ蜷・] ?? '').trim();[m
+[31m-[m
+[31m-        const waku = toInt(h['譫逡ｪ'] ?? '');[m
+[31m-        const umaban = toInt(h['鬥ｬ逡ｪ'] ?? '');[m
+[31m-[m
+[31m-        const uma_mark8 = (h['鬥ｬ蜊ｰ8'] ?? '').trim();[m
+[31m-        const race_comment = (h['繝ｬ繝ｼ繧ｹ繧ｳ繝｡繝ｳ繝・] ?? '').trim();[m
+[31m-        const result_comment = (h['邨先棡繧ｳ繝｡繝ｳ繝・] ?? '').trim();[m
+[31m-[m
+[31m-        if (race_id && !raceMap.has(race_id)) {[m
+[31m-          raceMap.set(race_id, {[m
+[31m-            race_id,[m
+[31m-            race_date: race_date,[m
+[31m-            place: place || null,[m
+[31m-            race_no: race_no,[m
+[31m-            race_name: race_name || null,[m
+[31m-            surface: surface || null,[m
+[31m-            distance_m: distance_m,[m
+[31m-            course_kbn: course_kbn || null,[m
+[31m-          });[m
+[31m-        }[m
+[31m-[m
+[31m-        if (horse_id && !horseMap.has(horse_id)) {[m
+[31m-          horseMap.set(horse_id, {[m
+[31m-            horse_id,[m
+[31m-            horse_name: horse_name || '(荳肴・)',[m
+[31m-          });[m
+[31m-        }[m
+[31m-[m
+[31m-        if (race_id && horse_id) {[m
+[31m-          const key = `${race_id}__${horse_id}`;[m
+[31m-          if (!entryMap.has(key)) {[m
+[31m-            entryMap.set(key, { race_id, horse_id, waku, umaban });[m
+[31m-          }[m
+[31m-        }[m
+[31m-[m
+[31m-        return {[m
+[31m-          user_id: uid,[m
+[31m-          author_name: sess.session?.user?.email ?? null,[m
+[31m-          updated_by: uid,[m
+[31m-          updated_by_name: sess.session?.user?.email ?? null,[m
+[31m-[m
+[31m-          race_id: race_id || null,[m
+[31m-          horse_id: horse_id || null,[m
+[31m-          horse_name: horse_name || null,[m
+[31m-          uma_mark8: uma_mark8 || null,[m
+[31m-          race_comment: race_comment || null,[m
+[31m-          result_comment: result_comment || null,[m
+[31m-        };[m
+[31m-      });[m
+[31m-[m
+[31m-      const racesPayload = Array.from(raceMap.values());[m
+[31m-      const horsesPayload = Array.from(horseMap.values());[m
+[31m-      const entriesPayload = Array.from(entryMap.values());[m
+[31m-[m
+[31m-      const batchSize = 200;[m
+[31m-[m
+[31m-      // races 竊・horses 竊・entries 竊・memos 縺ｮ鬆・〒謚募・・亥､夜Κ繧ｭ繝ｼ蟇ｾ遲厄ｼ・[m
+[31m-      let done = 0;[m
+[31m-      for (let i = 0; i < racesPayload.length; i += batchSize) {[m
+[31m-        const chunk = racesPayload.slice(i, i + batchSize);[m
+[31m-        const { error } = await supabase.from('races').upsert(chunk, { onConflict: 'race_id' });[m
+[31m-        if (error) {[m
+[31m-          setStatus(`NG: races upsert: ${error.message}・・{i + 1}陦檎岼縺ゅ◆繧奇ｼ荏);[m
+[31m-          return;[m
+[31m-        }[m
+[31m-        done += chunk.length;[m
+[31m-        setStatus(`騾ｲ陦御ｸｭ: races ${done}/${racesPayload.length}`);[m
+[31m-      }[m
+[31m-[m
+[31m-      done = 0;[m
+[31m-      for (let i = 0; i < horsesPayload.length; i += batchSize) {[m
+[31m-        const chunk = horsesPayload.slice(i, i + batchSize);[m
+[31m-        const { error } = await supabase.from('horses').upsert(chunk, { onConflict: 'horse_id' });[m
+[31m-        if (error) {[m
+[31m-          setStatus(`NG: horses upsert: ${error.message}・・{i + 1}陦檎岼縺ゅ◆繧奇ｼ荏);[m
+[31m-          return;[m
+[31m-        }[m
+[31m-        done += chunk.length;[m
+[31m-        setStatus(`騾ｲ陦御ｸｭ: horses ${done}/${horsesPayload.length}`);[m
+[31m-      }[m
+[31m-[m
+[31m-      done = 0;[m
+[31m-      for (let i = 0; i < entriesPayload.length; i += batchSize) {[m
+[31m-        const chunk = entriesPayload.slice(i, i + batchSize);[m
+[31m-        const { error } = await supabase.from('entries').upsert(chunk, { onConflict: 'race_id,horse_id' });[m
+[31m-        if (error) {[m
+[31m-          setStatus(`NG: entries upsert: ${error.message}・・{i + 1}陦檎岼縺ゅ◆繧奇ｼ荏);[m
+[31m-          return;[m
+[31m-        }[m
+[31m-        done += chunk.length;[m
+[31m-        setStatus(`騾ｲ陦御ｸｭ: entries ${done}/${entriesPayload.length}`);[m
+[31m-      }[m
+[31m-[m
+[31m-      done = 0;[m
+[31m-      for (let i = 0; i < memosPayload.length; i += batchSize) {[m
+[31m-        const chunk = memosPayload.slice(i, i + batchSize);[m
+[31m-        const { error } = await supabase.from('memos').upsert(chunk, {[m
+[31m-          onConflict: 'race_id,horse_id,user_id',[m
+[31m-          ignoreDuplicates: false, // 荳頑嶌縺・[m
+[31m-        });[m
+[31m-        if (error) {[m
+[31m-          setStatus(`NG: memos upsert: ${error.message}・・{i + 1}陦檎岼縺ゅ◆繧奇ｼ荏);[m
+[31m-          return;[m
+[31m-        }[m
+[31m-        done += chunk.length;[m
+[31m-        setStatus(`騾ｲ陦御ｸｭ: memos ${done}/${memosPayload.length}`);[m
+[31m-      }[m
+[31m-[m
+[31m-      setStatus([m
+[31m-        `OK: 蜿悶ｊ霎ｼ縺ｿ螳御ｺ・ｼ・aces:${racesPayload.length}, horses:${horsesPayload.length}, entries:${entriesPayload.length}, memos:${memosPayload.length}・荏[m
+[31m-      );[m
+[31m-    } catch (e: any) {[m
+[31m-      setStatus(`NG: ${e?.message ?? String(e)}`);[m
+[31m-    } finally {[m
+[31m-      setBusy(false);[m
+[31m-    }[m
+[31m-  }[m
+[31m-[m
+[31m-  return ([m
+[31m-    <main style={{ padding: 24, fontFamily: 'sans-serif', maxWidth: 860 }}>[m
+[31m-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>[m
+[31m-        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>CSV蜿悶ｊ霎ｼ縺ｿ</h1>[m
+[31m-        <Link[m
+[31m-          href="/"[m
+[31m-          style={{[m
+[31m-            padding: '8px 12px',[m
+[31m-            border: '1px solid #555',[m
+[31m-            borderRadius: 6,[m
+[31m-            textDecoration: 'none',[m
+[31m-            color: '#111',[m
+[31m-          }}[m
+[31m-        >[m
+[31m-          竊・謌ｻ繧・[m
+[31m-        </Link>[m
+[31m-      </div>[m
+[31m-[m
+[31m-      {/* 笘・ｿｽ蜉・壽ｳｨ諢乗枚・医ち繧､繝医Ν縺ｨ繝輔ぃ繧､繝ｫ驕ｸ謚槭・髢難ｼ・*/}[m
+[31m-      <div style={{ marginTop: 12, padding: 12, border: '1px solid #bbb', borderRadius: 8, background: '#fff' }}>[m
+[31m-        <div style={{ fontWeight: 700, marginBottom: 6 }}>窶ｻ蜿冶ｾｼ繝輔ぃ繧､繝ｫ豕ｨ諢・/div>[m
+[31m-        <div style={{ fontSize: 13, lineHeight: 1.6 }}>[m
+[31m-          竭A蛻励・繝倥ャ繝蜷阪・縲後Ξ繝ｼ繧ｹID(譁ｰ)縲・br />[m
+[31m-          竭｡繝ｬ繝ｼ繧ｹID縺ｯ鬥ｬ逡ｪ辟｡縺励・繧ゅ・繧剃ｽｿ逕ｨ(鬥ｬ逡ｪ繧堤､ｺ縺呎忰蟆ｾ縺ｮ2譯√′荳崎ｦ・<br />[m
+[31m-          竭｢F蛻励・繝倥ャ繝蜷阪・縲瑚茅繝縲・蜃ｺ襍ｰ鬥ｬ蛻・梵縺九ｉ蜃ｺ縺吶→闃昴・繝縺ｫ縺ｪ繧・[m
+[31m-        </div>[m
+[31m-      </div>[m
+[31m-[m
+[31m-      <section style={{ marginTop: 16, border: '1px solid #444', padding: 12, borderRadius: 8 }}>[m
+[31m-        <div style={{ fontWeight: 700 }}>CSV繝輔ぃ繧､繝ｫ</div>[m
+[31m-[m
+[31m-        <input[m
+[31m-          id="csvFileInput"[m
+[31m-          type="file"[m
+[31m-          accept=".csv,text/csv"[m
+[31m-          onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}[m
+[31m-          disabled={busy}[m
+[31m-          style={{ display: 'none' }}[m
+[31m-        />[m
+[31m-[m
+[31m-        <label[m
+[31m-          htmlFor="csvFileInput"[m
+[31m-          style={{[m
+[31m-            display: 'inline-block',[m
+[31m-            marginTop: 8,[m
+[31m-            padding: '8px 12px',[m
+[31m-            border: '1px solid #555',[m
+[31m-            borderRadius: 6,[m
+[31m-            cursor: busy ? 'not-allowed' : 'pointer',[m
+[31m-            opacity: busy ? 0.6 : 1,[m
+[31m-            background: '#fff',[m
+[31m-            userSelect: 'none',[m
+[31m-          }}[m
+[31m-        >[m
+[31m-          繝輔ぃ繧､繝ｫ繧帝∈謚・[m
+[31m-        </label>[m
+[31m-          [m
+[31m-[m
+[31m-        <div style={{ marginTop: 8, opacity: 0.8 }}>驕ｸ謚樔ｸｭ: {fileName ? fileName : '(譛ｪ驕ｸ謚・'}</div>[m
+[31m-[m
+[31m-        <button[m
+[31m-          onClick={doImport}[m
+[31m-          disabled={busy || rows.length === 0}[m
+[31m-          style={{[m
+[31m-            marginTop: 12,[m
+[31m-            padding: '8px 12px',[m
+[31m-            border: '1px solid #555',[m
+[31m-            borderRadius: 6,[m
+[31m-            opacity: busy || rows.length === 0 ? 0.6 : 1,[m
+[31m-            cursor: busy || rows.length === 0 ? 'not-allowed' : 'pointer',[m
+[31m-          }}[m
+[31m-        >[m
+[31m-          {busy ? '蜿悶ｊ霎ｼ縺ｿ荳ｭ...' : '蜿悶ｊ霎ｼ縺ｿ螳溯｡・}[m
+[31m-        </button>[m
+[31m-[m
+[31m-        {status && <div style={{ marginTop: 12 }}>{status}</div>}[m
+[31m-      </section>[m
+[31m-[m
+[31m-      <section style={{ marginTop: 16 }}>[m
+[31m-        <h2 style={{ fontSize: 16, fontWeight: 700 }}>繝励Ξ繝薙Η繝ｼ・亥・鬆ｭ5陦鯉ｼ・/h2>[m
+[31m-        <div style={{ marginTop: 8, opacity: 0.85 }}>隱ｭ縺ｿ霎ｼ縺ｿ陦梧焚: {rows.length}</div>[m
+[31m-[m
+[31m-        <div style={{ marginTop: 8, border: '1px solid #333', borderRadius: 8, overflow: 'auto' }}>[m
+[31m-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>[m
+[31m-            <thead>[m
+[31m-              <tr>[m
+[31m-                {Object.keys(preview[0] ?? {})[m
+[31m-                  .slice(0, 8)[m
+[31m-                  .map((k) => ([m
+[31m-                    <th[m
+[31m-                      key={k}[m
+[31m-                      style={{ textAlign: 'left', padding: 8, borderBottom: '1px solid #333', fontSize: 12 }}[m
+[31m-                    >[m
+[31m-                      {k}[m
+[31m-                    </th>[m
+[31m-                  ))}[m
+[31m-              </tr>[m
+[31m-            </thead>[m
+[31m-            <tbody>[m
+[31m-              {preview.map((r, idx) => ([m
+[31m-                <tr key={idx}>[m
+[31m-                  {Object.keys(preview[0] ?? {})[m
+[31m-                    .slice(0, 8)[m
+[31m-                    .map((k) => ([m
+[31m-                      <td[m
+[31m-                        key={k}[m
+[31m-                        style={{ padding: 8, borderBottom: '1px solid #222', fontSize: 12, opacity: 0.9 }}[m
+[31m-                      >[m
+[31m-                        {r[k]}[m
+[31m-                      </td>[m
+[31m-                    ))}[m
+[31m-                </tr>[m
+[31m-              ))}[m
+[31m-              {rows.length === 0 && ([m
+[31m-                <tr>[m
+[31m-                  <td style={{ padding: 12, opacity: 0.7 }}>CSV繧帝∈謚槭＠縺ｦ縺上□縺輔＞</td>[m
+[31m-                </tr>[m
+[31m-              )}[m
+[31m-            </tbody>[m
+[31m-          </table>[m
+[31m-        </div>[m
+[31m-      </section>[m
+[31m-    </main>[m
+[31m-  );[m
+[31m-}[m
+[1mdiff --git a/app/page.tsx b/app/page.tsx[m
+[1mindex 7fefd4b..c63a13b 100644[m
+[1m--- a/app/page.tsx[m
+[1m+++ b/app/page.tsx[m
+[36m@@ -96,7 +96,7 @@[m [mexport default function Home() {[m
+       setLoading(false);[m
+     })();[m
+ [m
+[31m-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {[m
+[32m+[m[32m    const { data: sub } = supabase.auth.onAuthStateChange(async (_event: any, session: any) => {[m
+       setUserEmail(session?.user?.email ?? null);[m
+     });[m
+ [m
+[1mdiff --git a/lib/supabaseClient.ts b/lib/supabaseClient.ts[m
+[1mindex d3c286c..fcc3ac7 100644[m
+[1m--- a/lib/supabaseClient.ts[m
+[1m+++ b/lib/supabaseClient.ts[m
+[36m@@ -1,14 +1,13 @@[m
+ ﻿import { createClient } from '@supabase/supabase-js';[m
+[32m+[m
+ declare global {[m
+   // eslint-disable-next-line no-var[m
+[31m-  var __keiba_supabase_client: ReturnType<typeof createClient> | undefined;[m
+[32m+[m[32m  var __keiba_supabase_client: any | undefined;[m
+ }[m
+ [m
+[31m-export const supabase =[m
+[32m+[m[32mexport const supabase: any =[m
+   globalThis.__keiba_supabase_client ??[m
+   (globalThis.__keiba_supabase_client = createClient([m
+     process.env.NEXT_PUBLIC_SUPABASE_URL!,[m
+     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY![m
+[31m-  ));[m
+[31m-[m
+[31m-[m
+[32m+[m[32m  ));[m
+\ No newline at end of file[m

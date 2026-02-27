@@ -1,17 +1,33 @@
 ﻿'use client';
-import { supabase } from '../../lib/supabaseClient';
 
-import { supabase } from '../../lib/supabaseClient';
-import { supabase } from '../lib/supabaseClient';
-import { useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
+import { supabase } from '../../lib/supabaseClient';
 
+type CsvRow = Record<string, string>;
 
-// 繝繝悶Ν繧ｯ繧ｩ繝ｼ繝亥ｯｾ蠢懊・邁｡譏鼎SV繝代・繧ｵ・郁｡悟腰菴搾ｼ・
+const REQUIRED_HEADERS = [
+  'レースID(新)',
+  '日付S',
+  '場所',
+  'Ｒ',
+  'レース名',
+  '芝ダ',
+  '距離',
+  '枠番',
+  '馬番',
+  '馬名',
+  '血統登録番号',
+  '馬印8',
+  'レースコメント',
+  '結果コメント',
+] as const;
+
 function parseCsv(text: string): string[][] {
+  // RFC4180-ish parser (handles quotes, commas, CRLF)
   const rows: string[][] = [];
   let row: string[] = [];
-  let cell = '';
+  let field = '';
   let inQuotes = false;
 
   for (let i = 0; i < text.length; i++) {
@@ -21,13 +37,13 @@ function parseCsv(text: string): string[][] {
       if (ch === '"') {
         const next = text[i + 1];
         if (next === '"') {
-          cell += '"';
+          field += '"';
           i++;
         } else {
           inQuotes = false;
         }
       } else {
-        cell += ch;
+        field += ch;
       }
       continue;
     }
@@ -36,412 +52,363 @@ function parseCsv(text: string): string[][] {
       inQuotes = true;
       continue;
     }
+
     if (ch === ',') {
-      row.push(cell);
-      cell = '';
+      row.push(field);
+      field = '';
       continue;
     }
-    if (ch === '\r') continue;
+
     if (ch === '\n') {
-      row.push(cell);
+      if (field.endsWith('\r')) field = field.slice(0, -1);
+      row.push(field);
       rows.push(row);
       row = [];
-      cell = '';
+      field = '';
       continue;
     }
-    cell += ch;
+
+    field += ch;
   }
-  if (cell.length || row.length) {
-    row.push(cell);
+
+  if (field.length || row.length) {
+    if (field.endsWith('\r')) field = field.slice(0, -1);
+    row.push(field);
     rows.push(row);
   }
+
+  while (rows.length && rows[rows.length - 1].every((c) => (c ?? '').trim() === '')) rows.pop();
   return rows;
 }
 
-function toIsoDate(dateS: string): string | null {
-  // "2026.2.1" -> "2026-02-01"
-  const s = (dateS ?? '').trim();
-  if (!s) return null;
-  const parts = s.split('.');
-  if (parts.length !== 3) return null;
-  const y = parts[0].padStart(4, '0');
-  const m = parts[1].padStart(2, '0');
-  const d = parts[2].padStart(2, '0');
-  return `${y}-${m}-${d}`;
+function toInt(s: string): number | null {
+  const t = (s ?? '').toString().trim();
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? Math.trunc(n) : null;
 }
 
-function toInt(v: string): number | null {
-  const s = (v ?? '').toString().replace(/[^\d]/g, '');
-  if (!s) return null;
-  const n = parseInt(s, 10);
-  return Number.isFinite(n) ? n : null;
+function normalizeDate(s: string): string | null {
+  const t = (s ?? '').toString().trim();
+  if (!t) return null;
+  // accept YYYY-MM-DD or YYYY/MM/DD
+  const m = t.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if (!m) return null;
+  const yyyy = m[1];
+  const mm = m[2].padStart(2, '0');
+  const dd = m[3].padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 export default function ImportPage() {
-  const [fileName, setFileName] = useState('');
-  const [rows, setRows] = useState<Record<string, string>[]>([]);
-  const [status, setStatus] = useState('');
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+
+  const [status, setStatus] = useState<string>('');
   const [busy, setBusy] = useState(false);
 
-  const preview = useMemo(() => rows.slice(0, 5), [rows]);
+  const [fileName, setFileName] = useState<string>('未選択');
+  const [csvRows, setCsvRows] = useState<CsvRow[]>([]);
+  const [headers, setHeaders] = useState<string[]>([]);
 
-  async function onPickFile(file: File | null) {
-    setStatus('');
-    setRows([]);
-    if (!file) {
-      setFileName('');
-      return;
-    }
-    setFileName(file.name);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.auth.getSession();
+      setUserEmail(data.session?.user?.email ?? null);
+    })();
+  }, []);
 
-    // Shift-JIS蜆ｪ蜈医〒隱ｭ繧
+  const preview = useMemo(() => csvRows.slice(0, 5), [csvRows]);
+
+  async function readFileAsText(file: File): Promise<string> {
     const buf = await file.arrayBuffer();
-    let text = '';
+    // Chrome/Edge supports 'shift-jis'. If unavailable, fallback to utf-8.
     try {
-      text = new TextDecoder('shift-jis').decode(buf);
+      return new TextDecoder('shift-jis').decode(buf);
     } catch {
-      text = new TextDecoder('utf-8').decode(buf);
+      return new TextDecoder('utf-8').decode(buf);
     }
+  }
 
+  async function onPickFile(f: File | null) {
+    setStatus('');
+    setCsvRows([]);
+    setHeaders([]);
+    if (!f) {
+      setFileName('未選択');
+      return;
+    }
+    setFileName(f.name);
+
+    const text = await readFileAsText(f);
     const table = parseCsv(text);
+
     if (table.length < 2) {
-      setStatus('NG: CSV縺檎ｩｺ縺ｧ縺・);
+      setStatus('NG: CSVの行数が足りません（ヘッダ＋1行以上必要）');
       return;
     }
 
-    const header = table[0].map((s) => (s ?? '').trim());
-    const data = table.slice(1).filter((r) => r.some((c) => (c ?? '').trim() !== ''));
+    const hdr = table[0].map((s) => (s ?? '').toString().trim());
+    setHeaders(hdr);
 
-    // 蠢・医・繝・ム讀懈渊・井ｸ崎ｶｳ縺ｪ繧牙●豁｢・・
-    const requiredHeaders = [
-      '繝ｬ繝ｼ繧ｹID(譁ｰ)',
-      '譌･莉牢',
-      '蝣ｴ謇',
-      '・ｲ',
-      '繝ｬ繝ｼ繧ｹ蜷・,
-      '闃昴ム',
-      '霍晞屬',
-      '繧ｳ繝ｼ繧ｹ蛹ｺ蛻・,
-      '譫逡ｪ',
-      '鬥ｬ逡ｪ',
-      '陦邨ｱ逋ｻ骭ｲ逡ｪ蜿ｷ',
-      '鬥ｬ蜷・,
-      '鬥ｬ蜊ｰ8',
-      '繝ｬ繝ｼ繧ｹ繧ｳ繝｡繝ｳ繝・,
-      '邨先棡繧ｳ繝｡繝ｳ繝・,
-    ];
-    const missing = requiredHeaders.filter((k) => !header.includes(k));
+    const missing = REQUIRED_HEADERS.filter((h) => !hdr.includes(h));
     if (missing.length) {
-      setStatus(`NG: CSV繝倥ャ繝荳崎ｶｳ: ${missing.join(', ')}`);
-      setRows([]);
+      setStatus(`NG: 必須ヘッダが不足しています: ${missing.join(', ')}`);
       return;
     }
 
-    const mapped: Record<string, string>[] = data.map((r) => {
-      const obj: Record<string, string> = {};
-      for (let i = 0; i < header.length; i++) obj[header[i]] = (r[i] ?? '').trim();
+    const data = table
+      .slice(1)
+      .filter((r) => r.some((c) => (c ?? '').toString().trim() !== ''));
+
+    const rows: CsvRow[] = data.map((r) => {
+      const obj: CsvRow = {};
+      hdr.forEach((h, idx) => {
+        obj[h] = (r[idx] ?? '').toString();
+      });
       return obj;
     });
 
-    setRows(mapped);
-    setStatus(`OK: 隱ｭ縺ｿ霎ｼ縺ｿ ${mapped.length} 陦形);
+    setCsvRows(rows);
+    setStatus(`OK: 読み込み行数: ${rows.length}`);
   }
 
-  async function doImport() {
-    setStatus('');
+  async function runImport() {
+    if (busy) return;
+    if (!csvRows.length) {
+      setStatus('NG: CSVを選択してください');
+      return;
+    }
+
     setBusy(true);
+    setStatus('');
+
+    const racesMap = new Map<string, any>();
+    const horsesMap = new Map<string, any>();
+    const entriesMap = new Map<string, any>();
+    const memos: any[] = [];
+
+    for (const r of csvRows) {
+      const raceId = (r['レースID(新)'] ?? '').trim();
+      const raceDate = normalizeDate(r['日付S']);
+      const place = (r['場所'] ?? '').trim() || null;
+      const raceNo = toInt(r['Ｒ']);
+      const raceName = (r['レース名'] ?? '').trim() || null;
+      const surface = (r['芝ダ'] ?? '').trim() || null;
+      const distanceM = toInt(r['距離']);
+      const waku = toInt(r['枠番']);
+      const umaban = toInt(r['馬番']);
+      const horseName = (r['馬名'] ?? '').trim() || null;
+      const horseId = (r['血統登録番号'] ?? '').trim();
+
+      if (!raceId) continue;
+      if (!horseId) continue;
+
+      if (!racesMap.has(raceId)) {
+        racesMap.set(raceId, {
+          race_id: raceId,
+          race_date: raceDate,
+          place,
+          race_no: raceNo,
+          race_name: raceName,
+          surface,
+          distance_m: distanceM,
+        });
+      }
+
+      if (!horsesMap.has(horseId)) {
+        horsesMap.set(horseId, {
+          horse_id: horseId,
+          horse_name: horseName,
+        });
+      }
+
+      const ek = `${raceId}__${horseId}`;
+      if (!entriesMap.has(ek)) {
+        entriesMap.set(ek, {
+          race_id: raceId,
+          horse_id: horseId,
+          waku,
+          umaban,
+        });
+      }
+
+      const mark8 = (r['馬印8'] ?? '').trim() || null;
+      const raceComment = (r['レースコメント'] ?? '').trim() || null;
+      const resultComment = (r['結果コメント'] ?? '').trim() || null;
+
+      if (mark8 || raceComment || resultComment) {
+        memos.push({
+          race_id: raceId,
+          horse_id: horseId,
+          uma_mark8: mark8,
+          race_comment: raceComment,
+          result_comment: resultComment,
+          author_name: userEmail,
+        });
+      }
+    }
+
+    const races = Array.from(racesMap.values());
+    const horses = Array.from(horsesMap.values());
+    const entries = Array.from(entriesMap.values());
 
     try {
-      const { data: sess, error: sErr } = await supabase.auth.getSession();
-      if (sErr) throw sErr;
-      const uid = sess.session?.user?.id;
-      if (!uid) {
-        setStatus('NG: 繝ｭ繧ｰ繧､繝ｳ縺励※縺上□縺輔＞');
-        return;
+      if (races.length) {
+        const { error } = await (supabase.from('races') as any).upsert(races, { onConflict: 'race_id' });
+        if (error) throw new Error(`races upsert: ${error.message}`);
       }
-
-      // 蠢・亥､繝√ぉ繝・け・・ace_id / horse_id・俄ｦ1陦後〒繧よｬ謳阪′縺ゅｌ縺ｰ蛛懈ｭ｢
-      const bad: { idx: number; reason: string; race_id: string; horse_id: string; horse_name: string }[] = [];
-      rows.forEach((h, i) => {
-        const race_id = (h['繝ｬ繝ｼ繧ｹID(譁ｰ)'] ?? '').trim();
-        const horse_id = (h['陦邨ｱ逋ｻ骭ｲ逡ｪ蜿ｷ'] ?? '').trim();
-        const horse_name = (h['鬥ｬ蜷・] ?? '').trim();
-        if (!race_id) bad.push({ idx: i + 2, reason: '繝ｬ繝ｼ繧ｹID(譁ｰ)縺檎ｩｺ', race_id, horse_id, horse_name });
-        else if (!horse_id) bad.push({ idx: i + 2, reason: '陦邨ｱ逋ｻ骭ｲ逡ｪ蜿ｷ縺檎ｩｺ', race_id, horse_id, horse_name });
-      });
-
-      if (bad.length) {
-        const sample = bad
-          .slice(0, 5)
-          .map(
-            (e) =>
-              `L${e.idx}:${e.reason}・・ace_id=${e.race_id || '-'} horse_id=${e.horse_id || '-'} 鬥ｬ蜷・${e.horse_name || '-'}・荏
-          )
-          .join(' / ');
-        setStatus(`NG: 蠢・磯・岼谺謳・${bad.length}陦後・{sample}`);
-        return;
+      if (horses.length) {
+        const { error } = await (supabase.from('horses') as any).upsert(horses, { onConflict: 'horse_id' });
+        if (error) throw new Error(`horses upsert: ${error.message}`);
       }
-
-      // races/horses/entries 逕ｨ縺ｫ驥崎､・賜髯､
-      const raceMap = new Map<string, any>();
-      const horseMap = new Map<string, any>();
-      const entryMap = new Map<string, any>();
-
-      // memos・亥・陦鯉ｼ・
-      const memosPayload = rows.map((h) => {
-        const race_id = (h['繝ｬ繝ｼ繧ｹID(譁ｰ)'] ?? '').trim();
-        const race_date = toIsoDate(h['譌･莉牢'] ?? '');
-        const place = (h['蝣ｴ謇'] ?? '').trim();
-        const race_no = toInt(h['・ｲ'] ?? '');
-        const race_name = (h['繝ｬ繝ｼ繧ｹ蜷・] ?? '').trim();
-        const surface = (h['闃昴ム'] ?? '').trim();
-        const distance_m = toInt(h['霍晞屬'] ?? '');
-        const course_kbn = (h['繧ｳ繝ｼ繧ｹ蛹ｺ蛻・] ?? '').trim();
-
-        const horse_id = (h['陦邨ｱ逋ｻ骭ｲ逡ｪ蜿ｷ'] ?? '').trim();
-        const horse_name = (h['鬥ｬ蜷・] ?? '').trim();
-
-        const waku = toInt(h['譫逡ｪ'] ?? '');
-        const umaban = toInt(h['鬥ｬ逡ｪ'] ?? '');
-
-        const uma_mark8 = (h['鬥ｬ蜊ｰ8'] ?? '').trim();
-        const race_comment = (h['繝ｬ繝ｼ繧ｹ繧ｳ繝｡繝ｳ繝・] ?? '').trim();
-        const result_comment = (h['邨先棡繧ｳ繝｡繝ｳ繝・] ?? '').trim();
-
-        if (race_id && !raceMap.has(race_id)) {
-          raceMap.set(race_id, {
-            race_id,
-            race_date: race_date,
-            place: place || null,
-            race_no: race_no,
-            race_name: race_name || null,
-            surface: surface || null,
-            distance_m: distance_m,
-            course_kbn: course_kbn || null,
-          });
-        }
-
-        if (horse_id && !horseMap.has(horse_id)) {
-          horseMap.set(horse_id, {
-            horse_id,
-            horse_name: horse_name || '(荳肴・)',
-          });
-        }
-
-        if (race_id && horse_id) {
-          const key = `${race_id}__${horse_id}`;
-          if (!entryMap.has(key)) {
-            entryMap.set(key, { race_id, horse_id, waku, umaban });
-          }
-        }
-
-        return {
-          user_id: uid,
-          author_name: sess.session?.user?.email ?? null,
-          updated_by: uid,
-          updated_by_name: sess.session?.user?.email ?? null,
-
-          race_id: race_id || null,
-          horse_id: horse_id || null,
-          horse_name: horse_name || null,
-          uma_mark8: uma_mark8 || null,
-          race_comment: race_comment || null,
-          result_comment: result_comment || null,
-        };
-      });
-
-      const racesPayload = Array.from(raceMap.values());
-      const horsesPayload = Array.from(horseMap.values());
-      const entriesPayload = Array.from(entryMap.values());
-
-      const batchSize = 200;
-
-      // races 竊・horses 竊・entries 竊・memos 縺ｮ鬆・〒謚募・・亥､夜Κ繧ｭ繝ｼ蟇ｾ遲厄ｼ・
-      let done = 0;
-      for (let i = 0; i < racesPayload.length; i += batchSize) {
-        const chunk = racesPayload.slice(i, i + batchSize);
-        const { error } = await supabase.from('races').upsert(chunk, { onConflict: 'race_id' });
-        if (error) {
-          setStatus(`NG: races upsert: ${error.message}・・{i + 1}陦檎岼縺ゅ◆繧奇ｼ荏);
-          return;
-        }
-        done += chunk.length;
-        setStatus(`騾ｲ陦御ｸｭ: races ${done}/${racesPayload.length}`);
+      if (entries.length) {
+        const { error } = await (supabase.from('entries') as any).upsert(entries, { onConflict: 'race_id,horse_id' });
+        if (error) throw new Error(`entries upsert: ${error.message}`);
       }
-
-      done = 0;
-      for (let i = 0; i < horsesPayload.length; i += batchSize) {
-        const chunk = horsesPayload.slice(i, i + batchSize);
-        const { error } = await supabase.from('horses').upsert(chunk, { onConflict: 'horse_id' });
-        if (error) {
-          setStatus(`NG: horses upsert: ${error.message}・・{i + 1}陦檎岼縺ゅ◆繧奇ｼ荏);
-          return;
-        }
-        done += chunk.length;
-        setStatus(`騾ｲ陦御ｸｭ: horses ${done}/${horsesPayload.length}`);
-      }
-
-      done = 0;
-      for (let i = 0; i < entriesPayload.length; i += batchSize) {
-        const chunk = entriesPayload.slice(i, i + batchSize);
-        const { error } = await supabase.from('entries').upsert(chunk, { onConflict: 'race_id,horse_id' });
-        if (error) {
-          setStatus(`NG: entries upsert: ${error.message}・・{i + 1}陦檎岼縺ゅ◆繧奇ｼ荏);
-          return;
-        }
-        done += chunk.length;
-        setStatus(`騾ｲ陦御ｸｭ: entries ${done}/${entriesPayload.length}`);
-      }
-
-      done = 0;
-      for (let i = 0; i < memosPayload.length; i += batchSize) {
-        const chunk = memosPayload.slice(i, i + batchSize);
-        const { error } = await supabase.from('memos').upsert(chunk, {
-          onConflict: 'race_id,horse_id,user_id',
-          ignoreDuplicates: false, // 荳頑嶌縺・
-        });
-        if (error) {
-          setStatus(`NG: memos upsert: ${error.message}・・{i + 1}陦檎岼縺ゅ◆繧奇ｼ荏);
-          return;
-        }
-        done += chunk.length;
-        setStatus(`騾ｲ陦御ｸｭ: memos ${done}/${memosPayload.length}`);
+      if (memos.length) {
+        const { error } = await (supabase.from('memos') as any).insert(memos);
+        if (error) throw new Error(`memos insert: ${error.message}`);
       }
 
       setStatus(
-        `OK: 蜿悶ｊ霎ｼ縺ｿ螳御ｺ・ｼ・aces:${racesPayload.length}, horses:${horsesPayload.length}, entries:${entriesPayload.length}, memos:${memosPayload.length}・荏
+        `OK: 取込完了（races=${races.length}, horses=${horses.length}, entries=${entries.length}, memos=${memos.length}）`
       );
-    } catch (e: any) {
-      setStatus(`NG: ${e?.message ?? String(e)}`);
+    } catch (err: any) {
+      setStatus(`NG: ${err?.message ?? String(err)}`);
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <main style={{ padding: 24, fontFamily: 'sans-serif', maxWidth: 860 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>CSV蜿悶ｊ霎ｼ縺ｿ</h1>
+    <div style={{ padding: 24, maxWidth: 980, margin: '0 auto' }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 12,
+          flexWrap: 'wrap',
+        }}
+      >
+        <h1 style={{ fontSize: 28, margin: 0 }}>CSV取り込み</h1>
         <Link
           href="/"
           style={{
-            padding: '8px 12px',
-            border: '1px solid #555',
-            borderRadius: 6,
+            border: '1px solid #333',
+            padding: '10px 14px',
+            borderRadius: 8,
             textDecoration: 'none',
             color: '#111',
           }}
         >
-          竊・謌ｻ繧・
+          ← 戻る
         </Link>
       </div>
 
-      {/* 笘・ｿｽ蜉・壽ｳｨ諢乗枚・医ち繧､繝医Ν縺ｨ繝輔ぃ繧､繝ｫ驕ｸ謚槭・髢難ｼ・*/}
-      <div style={{ marginTop: 12, padding: 12, border: '1px solid #bbb', borderRadius: 8, background: '#fff' }}>
-        <div style={{ fontWeight: 700, marginBottom: 6 }}>窶ｻ蜿冶ｾｼ繝輔ぃ繧､繝ｫ豕ｨ諢・/div>
-        <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-          竭A蛻励・繝倥ャ繝蜷阪・縲後Ξ繝ｼ繧ｹID(譁ｰ)縲・br />
-          竭｡繝ｬ繝ｼ繧ｹID縺ｯ鬥ｬ逡ｪ辟｡縺励・繧ゅ・繧剃ｽｿ逕ｨ(鬥ｬ逡ｪ繧堤､ｺ縺呎忰蟆ｾ縺ｮ2譯√′荳崎ｦ・<br />
-          竭｢F蛻励・繝倥ャ繝蜷阪・縲瑚茅繝縲・蜃ｺ襍ｰ鬥ｬ蛻・梵縺九ｉ蜃ｺ縺吶→闃昴・繝縺ｫ縺ｪ繧・
+      <div style={{ marginTop: 16, border: '1px solid #bbb', borderRadius: 10, padding: 14, background: '#fff' }}>
+        <div style={{ fontWeight: 800, marginBottom: 8 }}>※ 取込ファイル注意</div>
+        <div style={{ lineHeight: 1.8 }}>
+          <div>①A列のヘッダ名は「レースID(新)」</div>
+          <div>②レースIDは馬番無しのものを使用（馬番を示す末尾の2桁が不要）</div>
+          <div>③F列のヘッダ名は「芝ダ」（出走馬分析から出すと芝・ダになる）</div>
         </div>
       </div>
 
-      <section style={{ marginTop: 16, border: '1px solid #444', padding: 12, borderRadius: 8 }}>
-        <div style={{ fontWeight: 700 }}>CSV繝輔ぃ繧､繝ｫ</div>
+      <div style={{ marginTop: 18, border: '1px solid #bbb', borderRadius: 10, padding: 14, background: '#fff' }}>
+        <div style={{ fontWeight: 800, marginBottom: 10, fontSize: 18 }}>CSVファイル</div>
 
-        <input
-          id="csvFileInput"
-          type="file"
-          accept=".csv,text/csv"
-          onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
-          disabled={busy}
-          style={{ display: 'none' }}
-        />
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label style={{ display: 'inline-block' }}>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              style={{ display: 'none' }}
+              onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
+            />
+            <span
+              style={{
+                display: 'inline-block',
+                border: '1px solid #333',
+                padding: '10px 14px',
+                borderRadius: 8,
+                cursor: 'pointer',
+              }}
+            >
+              ファイルを選択
+            </span>
+          </label>
 
-        <label
-          htmlFor="csvFileInput"
+          <div style={{ color: '#333' }}>選択中: {fileName}</div>
+
+          <button
+            type="button"
+            onClick={runImport}
+            disabled={busy || csvRows.length === 0}
+            style={{
+              border: '1px solid #999',
+              padding: '10px 14px',
+              borderRadius: 8,
+              cursor: busy || csvRows.length === 0 ? 'not-allowed' : 'pointer',
+              opacity: busy || csvRows.length === 0 ? 0.5 : 1,
+              marginLeft: 8,
+            }}
+          >
+            取り込み実行
+          </button>
+        </div>
+
+        <div style={{ marginTop: 14, fontWeight: 800, fontSize: 18 }}>プレビュー（先頭5行）</div>
+        <div style={{ marginTop: 8 }}>読み込み行数: {csvRows.length}</div>
+
+        <div
           style={{
-            display: 'inline-block',
-            marginTop: 8,
-            padding: '8px 12px',
-            border: '1px solid #555',
-            borderRadius: 6,
-            cursor: busy ? 'not-allowed' : 'pointer',
-            opacity: busy ? 0.6 : 1,
-            background: '#fff',
-            userSelect: 'none',
+            marginTop: 10,
+            border: '1px solid #ccc',
+            borderRadius: 10,
+            padding: 12,
+            minHeight: 44,
+            background: '#fafafa',
           }}
         >
-          繝輔ぃ繧､繝ｫ繧帝∈謚・
-        </label>
-          
+          {status || 'CSVを選択してください'}
+        </div>
 
-        <div style={{ marginTop: 8, opacity: 0.8 }}>驕ｸ謚樔ｸｭ: {fileName ? fileName : '(譛ｪ驕ｸ謚・'}</div>
-
-        <button
-          onClick={doImport}
-          disabled={busy || rows.length === 0}
-          style={{
-            marginTop: 12,
-            padding: '8px 12px',
-            border: '1px solid #555',
-            borderRadius: 6,
-            opacity: busy || rows.length === 0 ? 0.6 : 1,
-            cursor: busy || rows.length === 0 ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {busy ? '蜿悶ｊ霎ｼ縺ｿ荳ｭ...' : '蜿悶ｊ霎ｼ縺ｿ螳溯｡・}
-        </button>
-
-        {status && <div style={{ marginTop: 12 }}>{status}</div>}
-      </section>
-
-      <section style={{ marginTop: 16 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 700 }}>繝励Ξ繝薙Η繝ｼ・亥・鬆ｭ5陦鯉ｼ・/h2>
-        <div style={{ marginTop: 8, opacity: 0.85 }}>隱ｭ縺ｿ霎ｼ縺ｿ陦梧焚: {rows.length}</div>
-
-        <div style={{ marginTop: 8, border: '1px solid #333', borderRadius: 8, overflow: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                {Object.keys(preview[0] ?? {})
-                  .slice(0, 8)
-                  .map((k) => (
+        {preview.length > 0 ? (
+          <div style={{ marginTop: 12, overflowX: 'auto' }}>
+            <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 900, background: '#fff' }}>
+              <thead>
+                <tr>
+                  {headers.map((h) => (
                     <th
-                      key={k}
-                      style={{ textAlign: 'left', padding: 8, borderBottom: '1px solid #333', fontSize: 12 }}
+                      key={h}
+                      style={{
+                        border: '1px solid #ddd',
+                        padding: '6px 8px',
+                        background: '#f5f5f5',
+                        whiteSpace: 'nowrap',
+                      }}
                     >
-                      {k}
+                      {h}
                     </th>
                   ))}
-              </tr>
-            </thead>
-            <tbody>
-              {preview.map((r, idx) => (
-                <tr key={idx}>
-                  {Object.keys(preview[0] ?? {})
-                    .slice(0, 8)
-                    .map((k) => (
-                      <td
-                        key={k}
-                        style={{ padding: 8, borderBottom: '1px solid #222', fontSize: 12, opacity: 0.9 }}
-                      >
-                        {r[k]}
+                </tr>
+              </thead>
+              <tbody>
+                {preview.map((r, idx) => (
+                  <tr key={idx}>
+                    {headers.map((h) => (
+                      <td key={h} style={{ border: '1px solid #eee', padding: '6px 8px', whiteSpace: 'nowrap' }}>
+                        {(r[h] ?? '').toString()}
                       </td>
                     ))}
-                </tr>
-              ))}
-              {rows.length === 0 && (
-                <tr>
-                  <td style={{ padding: 12, opacity: 0.7 }}>CSV繧帝∈謚槭＠縺ｦ縺上□縺輔＞</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </main>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }
-
-

@@ -96,7 +96,7 @@ export default function Home() {
       setLoading(false);
     })();
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_event: any, session: any) => {
       setUserEmail(session?.user?.email ?? null);
     });
 
