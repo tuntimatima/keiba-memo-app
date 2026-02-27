@@ -1,11 +1,14 @@
 ﻿'use client';
-import { supabase } from '../../lib/supabaseClient';
 
-import { supabase } from '../../lib/supabaseClient';
 import { supabase } from '../lib/supabaseClient';
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
+import { createClient } from '@supabase/supabase-js';
 
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 // 繝繝悶Ν繧ｯ繧ｩ繝ｼ繝亥ｯｾ蠢懊・邁｡譏鼎SV繝代・繧ｵ・郁｡悟腰菴搾ｼ・
 function parseCsv(text: string): string[][] {
@@ -443,5 +446,3 @@ export default function ImportPage() {
     </main>
   );
 }
-
-

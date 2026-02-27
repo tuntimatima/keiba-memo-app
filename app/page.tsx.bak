@@ -1,12 +1,23 @@
 ﻿'use client';
-import { supabase } from '../lib/supabaseClient';
 
+import { supabase } from '../lib/supabaseClient';
+import { createClient } from '@supabase/supabase-js';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
 // NOTE: ブラウザ内で Supabase クライアントが多重生成されると
 // GoTrueClient の warning が出て挙動が不安定になることがあるため
 // globalThis に 1 個だけキャッシュして使い回す。
+const supabase = (() => {
+  const g = globalThis as any;
+  if (!g.__keiba_supabase_client) {
+    g.__keiba_supabase_client = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return g.__keiba_supabase_client as ReturnType<typeof createClient>;
+})();
 
 type Place = string;
 
@@ -762,5 +773,3 @@ export default function Home() {
     </>
   );
 }
-
-
