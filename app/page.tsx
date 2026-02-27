@@ -496,14 +496,14 @@ export default function Home() {
         .uma-table td { border:1px solid #ccc; overflow:hidden; color:#111; }
 
         .centerCell { text-align:center; vertical-align: middle; font-weight:800; }
-        .nameCell { vertical-align: middle; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding: 0 8px; }
+        .nameCell { vertical-align: middle; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding: 0 8px; }
 
         .cell { cursor:pointer; }
         .race-head { background:#f2f2f2; padding:2px 4px; font-size:10px; border-bottom:1px solid #eee; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .memo-box { padding:2px 4px; border-bottom:1px dotted #ddd; }
         .memo-line { font-size:10px; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .race-comm { background:#fff9c4; }
-        .res-comm { background:#e3f2fd; }
+        .res-comm { background:#e3f2fd; font-weight: bold; }
 
         .markBadge {
           display: inline-block;
