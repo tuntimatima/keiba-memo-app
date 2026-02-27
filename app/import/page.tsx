@@ -188,17 +188,14 @@ export default function ImportPage() {
     const memos: any[] = [];
 
     for (const r of csvRows) {
-      const raceId = (r['レースID(新)'] ?? '').trim();
+      const raceIdRaw = (r['レースID(新)'] ?? '').trim();
 
-      // RX込み：18文字=馬番なし（正） / 20文字=馬番あり（誤：末尾2文字を落とす）
-      let raceId = raceIdRaw;
-      if (raceIdRaw.length === 20) {
-        raceId = raceIdRaw.slice(0, 18);
-      } else if (raceIdRaw.length !== 18) {
+      if (raceIdRaw.length !== 18 && raceIdRaw.length !== 20) {
         setStatus(`NG: レースID(新)の長さが不正です: "${raceIdRaw}" (${raceIdRaw.length}文字)`);
         setBusy(false);
         return;
       }
+      const raceId = raceIdRaw.length === 20 ? raceIdRaw.slice(0, 18) : raceIdRaw;
 
       const raceDate = normalizeDate(r['日付S']);
       const place = (r['場所'] ?? '').trim() || null;
