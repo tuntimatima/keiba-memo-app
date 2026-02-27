@@ -92,7 +92,7 @@ function normalizeDate(s: string): string | null {
   const t = (s ?? '').toString().trim();
   if (!t) return null;
   // accept YYYY-MM-DD or YYYY/MM/DD or YYYY.M.D
-  const m = t.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  const m = t.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);
   if (!m) return null;
   const yyyy = m[1];
   const mm = m[2].padStart(2, '0');
