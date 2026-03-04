@@ -135,6 +135,88 @@ export default function Home() {
   }
 
   // ===== Helpers =====
+  const YOSOU_MARKS = ['◎', '○', '▲', '△', '☆', '✓', '消'];
+
+  async function saveUmaMark(horseId: string, mark: string) {
+    if (!activeRaceId || !userEmail) return;
+
+    const k = cellKey(horseId, activeRaceId);
+    const existingMemos = memosByHorseRace[k] ?? [];
+    const myMemo = existingMemos.find(m => m.author_name === userEmail);
+
+    const payload = {
+      ...(myMemo ? { id: myMemo.id } : {}),
+      race_id: activeRaceId,
+      horse_id: horseId,
+      author_name: userEmail,
+      uma_mark8: mark || null,
+      race_comment: myMemo?.race_comment ?? null,
+      result_comment: myMemo?.result_comment ?? null,
+    };
+
+    const { error } = await supabase.from('memos').upsert(payload, myMemo ? { onConflict: 'id' } : undefined);
+    if (error) {
+      setMsg(`印の保存失敗: ${error.message}`);
+    } else {
+      await loadRaceView(activeRaceId);
+    }
+  }
+
+  function renderYosouMarkCell(horseId: string) {
+    if (!activeRaceId) return null;
+    const k = cellKey(horseId, activeRaceId);
+    const mList = memosByHorseRace[k] ?? [];
+    const myMemo = userEmail ? mList.find(m => m.author_name === userEmail) : null;
+    const othersMemos = userEmail
+      ? mList.filter(m => m.author_name !== userEmail && m.uma_mark8)
+      : mList.filter(m => m.uma_mark8);
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {userEmail ? (
+          <select
+            value={myMemo?.uma_mark8 ?? ''}
+            onChange={(e) => saveUmaMark(horseId, e.target.value)}
+            style={{
+              padding: 2,
+              backgroundColor: getAuthorColor(userEmail),
+              border: `1px solid #ccc`,
+              borderRadius: 4,
+              fontSize: 12,
+              fontWeight: 800,
+              cursor: 'pointer',
+              color: '#111'
+            }}
+          >
+            <option value="">(無)</option>
+            {YOSOU_MARKS.map(mk => <option key={mk} value={mk}>{mk}</option>)}
+          </select>
+        ) : null}
+
+        {othersMemos.map(m => (
+          <div
+            key={m.id}
+            title={m.author_name ?? ''}
+            style={{
+              backgroundColor: getAuthorColor(m.author_name),
+              padding: '2px 4px',
+              borderRadius: 4,
+              fontSize: 11,
+              fontWeight: 800,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              color: '#111'
+            }}
+          >
+            <span style={{ marginRight: 4 }}>{m.uma_mark8}</span>
+            <span style={{ fontSize: 9, opacity: 0.8 }}>{m.author_name?.split('@')[0]}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   function cellKey(horseId: string, raceId: string) {
     return `${horseId}__${raceId}`;
   }
@@ -202,13 +284,13 @@ export default function Home() {
   }
 
   function getAuthorColor(authorName: string | null): string {
-    if (!authorName) return '#e3f2fd'; // デフォルトの青系
+    if (!authorName) return 'rgba(227, 242, 253, 0.8)'; // デフォルトの青系
     let hash = 0;
     for (let i = 0; i < authorName.length; i++) {
       hash = authorName.charCodeAt(i) + ((hash << 5) - hash);
     }
     const hue = Math.abs(hash * 137) % 360;
-    return `hsl(${hue}, 80%, 90%)`;
+    return `hsla(${hue}, 80%, 90%, 0.8)`;
   }
 
   // ===== Races =====
@@ -411,11 +493,13 @@ export default function Home() {
       new Set(horseIds.flatMap((hid) => (racesByHorse[hid] ?? []).map((rr) => rr.race_id)))
     );
 
+    const fetchRaceIds = Array.from(new Set([...last5RaceIds, raceId]));
+
     const { data: memos, error: mErr } = await supabase
       .from('memos')
       .select('id,race_id,horse_id,uma_mark8,race_comment,result_comment,author_name,created_at')
       .in('horse_id', horseIds)
-      .in('race_id', last5RaceIds)
+      .in('race_id', fetchRaceIds)
       .order('created_at', { ascending: false });
 
     if (mErr) {
@@ -700,15 +784,16 @@ export default function Home() {
               <th style={{ width: 54 }}>枠</th>
               <th style={{ width: 54 }}>馬</th>
               <th style={{ width: 220 }}>馬名</th>
+              <th style={{ width: 70 }}>印</th>
               <th colSpan={5}>最新5走メモ（クリックで全文）</th>
             </tr>
           </thead>
 
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} style={{ padding: 12, opacity: 0.7 }}>Loading...</td></tr>
+              <tr><td colSpan={9} style={{ padding: 12, opacity: 0.7 }}>Loading...</td></tr>
             ) : horsesView.length === 0 ? (
-              <tr><td colSpan={8} style={{ padding: 12, opacity: 0.7 }}>表示する馬がありません（レースを選択してください）</td></tr>
+              <tr><td colSpan={9} style={{ padding: 12, opacity: 0.7 }}>表示する馬がありません（レースを選択してください）</td></tr>
             ) : (
               horsesView.map((h) => {
                 const w = wakuStyle(h.waku);
@@ -722,6 +807,10 @@ export default function Home() {
                     </td>
                     <td className="centerCell">{h.umaban ?? '-'}</td>
                     <td className="nameCell" title={h.horse_name}>{h.horse_name}</td>
+
+                    <td className="cell" style={{ verticalAlign: 'top', padding: 4 }}>
+                      {renderYosouMarkCell(h.horse_id)}
+                    </td>
 
                     {cols.map((r, idx) => {
                       if (!r) return <td key={idx} style={{ opacity: 0.5, textAlign: 'center', verticalAlign: 'middle' }}>-</td>;
