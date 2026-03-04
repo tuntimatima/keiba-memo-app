@@ -83,8 +83,9 @@ function MarkSelect({
         onSave(horseId, e.target.value);
       }}
       style={{
-        width: '100%',
-        padding: '2px 0',
+        width: 32,
+        height: 24,
+        padding: 0,
         backgroundColor: authorColor,
         border: '1px solid #ccc',
         borderRadius: 4,
@@ -275,7 +276,7 @@ export default function Home() {
       : mList.filter(m => m.uma_mark8);
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
         {userEmail ? (
           <MarkSelect
             initialMark={myMemo?.uma_mark8 ?? ''}
@@ -286,29 +287,28 @@ export default function Home() {
           />
         ) : null}
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-          {othersMemos.map(m => (
-            <div
-              key={m.id}
-              title={m.author_name ?? ''}
-              style={{
-                backgroundColor: getAuthorColor(m.author_name),
-                borderRadius: 4,
-                fontSize: 10,
-                fontWeight: 800,
-                color: '#111',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 18,
-                height: 18,
-                lineHeight: '18px'
-              }}
-            >
-              {m.uma_mark8}
-            </div>
-          ))}
-        </div>
+        {othersMemos.map(m => (
+          <div
+            key={m.id}
+            title={m.author_name ?? ''}
+            style={{
+              backgroundColor: getAuthorColor(m.author_name),
+              border: '1px solid #ccc',
+              borderRadius: 4,
+              fontSize: 12,
+              fontWeight: 800,
+              color: '#111',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 32,
+              height: 24,
+              lineHeight: '24px'
+            }}
+          >
+            {m.uma_mark8}
+          </div>
+        ))}
       </div>
     );
   }
@@ -951,8 +951,8 @@ export default function Home() {
             <tr>
               <th style={{ width: 54 }}>枠</th>
               <th style={{ width: 54 }}>馬</th>
-              <th style={{ width: 220 }}>馬名</th>
-              <th style={{ width: 35 }}>印</th>
+              <th style={{ width: 154 }}>馬名</th>
+              <th style={{ width: 80 }}>印</th>
               <th colSpan={5}>最新5走メモ（クリックで全文）</th>
             </tr>
           </thead>
