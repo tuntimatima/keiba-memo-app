@@ -154,11 +154,11 @@ export default function Home() {
     if (!m) return null;
     const cls =
       m === 'S' ? 'mkS' :
-      m === 'A' ? 'mkA' :
-      m === 'B' ? 'mkB' :
-      m === 'C' ? 'mkC' :
-      m === '危' ? 'mkKiki' :
-      m === '弱' ? 'mkYowa' : 'mkOther';
+        m === 'A' ? 'mkA' :
+          m === 'B' ? 'mkB' :
+            m === 'C' ? 'mkC' :
+              m === '危' ? 'mkKiki' :
+                m === '弱' ? 'mkYowa' : 'mkOther';
     return <span className={`markBadge ${cls}`}>【{m}】</span>;
   }
 
@@ -199,6 +199,16 @@ export default function Home() {
     };
     const c = map[w] ?? { bg: '#ffffff', fg: '#111111', bd: '#999999' };
     return { background: c.bg, color: c.fg, border: c.bd };
+  }
+
+  function getAuthorColor(authorName: string | null): string {
+    if (!authorName) return '#e3f2fd'; // デフォルトの青系
+    let hash = 0;
+    for (let i = 0; i < authorName.length; i++) {
+      hash = authorName.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const hue = Math.abs(hash * 137) % 360;
+    return `hsl(${hue}, 80%, 90%)`;
   }
 
   // ===== Races =====
@@ -367,8 +377,21 @@ export default function Home() {
       if (!racesByHorse[x.horse_id]) racesByHorse[x.horse_id] = [];
       racesByHorse[x.horse_id].push(rr);
     }
+
+    const targetRace = raceMap.get(raceId);
+    const targetDate = targetRace?.race_date ?? '9999-12-31';
+    const targetNo = targetRace?.race_no ?? 999;
+
     for (const hid of Object.keys(racesByHorse)) {
-      racesByHorse[hid].sort((a, b) => {
+      const pastRaces = racesByHorse[hid].filter(r => {
+        const rd = r.race_date ?? '';
+        const rn = r.race_no ?? 0;
+        if (rd < targetDate) return true;
+        if (rd === targetDate && rn < targetNo) return true;
+        return false;
+      });
+
+      pastRaces.sort((a, b) => {
         const ad = a.race_date ?? '';
         const bd = b.race_date ?? '';
         if (ad !== bd) return ad < bd ? 1 : -1;
@@ -376,7 +399,7 @@ export default function Home() {
         const bn = b.race_no ?? 0;
         return bn - an;
       });
-      racesByHorse[hid] = racesByHorse[hid].slice(0, 5);
+      racesByHorse[hid] = pastRaces.slice(0, 5);
     }
 
     const last5RaceIds = Array.from(
@@ -714,7 +737,7 @@ export default function Home() {
                                   {markBadge(m.uma_mark8)}
                                   {m.race_comment ?? ''}
                                 </div>
-                                <div className="memo-line res-comm">{m.result_comment ?? ''}</div>
+                                <div className="memo-line res-comm" style={{ backgroundColor: getAuthorColor(m.author_name) }}>{m.result_comment ?? ''}</div>
                               </div>
                             ))
                           )}
@@ -751,7 +774,7 @@ export default function Home() {
                     <div style={{ fontSize: 11, fontWeight: 800, marginBottom: 4 }}>Rコメント</div>
                     <div className="fw-text">{m.race_comment ?? ''}</div>
                     <div style={{ fontSize: 11, fontWeight: 800, marginBottom: 4 }}>結果コメント</div>
-                    <div className="fw-text">{m.result_comment ?? ''}</div>
+                    <div className="fw-text" style={{ backgroundColor: getAuthorColor(m.author_name), padding: '6px 8px', borderRadius: '0 4px 4px 0' }}>{m.result_comment ?? ''}</div>
                   </div>
                 ))
               )}
