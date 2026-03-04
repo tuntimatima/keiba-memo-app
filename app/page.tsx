@@ -53,6 +53,59 @@ type HorseViewRow = {
   last5: RaceRow[]; // 最新5走（最新→過去）
 };
 
+// --- MarkSelect Component ---
+// 選択時の表示を即時反映（ローカルState）させるためのラッパーコンポーネント
+// ※Reactの単一方向データフローによる `<select>` の「選択しても元に戻る」挙動を防ぐため
+function MarkSelect({
+  initialMark,
+  horseId,
+  authorColor,
+  YOSOU_MARKS,
+  onSave
+}: {
+  initialMark: string;
+  horseId: string;
+  authorColor: string;
+  YOSOU_MARKS: string[];
+  onSave: (horseId: string, mark: string) => void;
+}) {
+  const [localMark, setLocalMark] = useState(initialMark);
+
+  useEffect(() => {
+    setLocalMark(initialMark);
+  }, [initialMark]);
+
+  return (
+    <select
+      value={localMark}
+      onChange={(e) => {
+        setLocalMark(e.target.value);
+        onSave(horseId, e.target.value);
+      }}
+      style={{
+        width: '100%',
+        padding: '2px 0',
+        backgroundColor: authorColor,
+        border: '1px solid #ccc',
+        borderRadius: 4,
+        fontSize: 12,
+        fontWeight: 800,
+        cursor: 'pointer',
+        color: '#111',
+        appearance: 'none', // 矢印を消して省スペース化
+        textAlign: 'center',
+      }}
+    >
+      <option value="">-</option>
+      {YOSOU_MARKS.map((mk) => (
+        <option key={mk} value={mk}>
+          {mk}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 export default function Home() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
@@ -174,23 +227,13 @@ export default function Home() {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {userEmail ? (
-          <select
-            value={myMemo?.uma_mark8 ?? ''}
-            onChange={(e) => saveUmaMark(horseId, e.target.value)}
-            style={{
-              padding: 2,
-              backgroundColor: getAuthorColor(userEmail),
-              border: `1px solid #ccc`,
-              borderRadius: 4,
-              fontSize: 12,
-              fontWeight: 800,
-              cursor: 'pointer',
-              color: '#111'
-            }}
-          >
-            <option value="">(無)</option>
-            {YOSOU_MARKS.map(mk => <option key={mk} value={mk}>{mk}</option>)}
-          </select>
+          <MarkSelect
+            initialMark={myMemo?.uma_mark8 ?? ''}
+            horseId={horseId}
+            authorColor={getAuthorColor(userEmail)}
+            YOSOU_MARKS={YOSOU_MARKS}
+            onSave={saveUmaMark}
+          />
         ) : null}
 
         {othersMemos.map(m => (
@@ -784,7 +827,7 @@ export default function Home() {
               <th style={{ width: 54 }}>枠</th>
               <th style={{ width: 54 }}>馬</th>
               <th style={{ width: 220 }}>馬名</th>
-              <th style={{ width: 70 }}>印</th>
+              <th style={{ width: 35 }}>印</th>
               <th colSpan={5}>最新5走メモ（クリックで全文）</th>
             </tr>
           </thead>
