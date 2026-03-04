@@ -112,6 +112,7 @@ export default function Home() {
 
   // auth
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
 
   // login UI（Magic Link）
   const [loginEmail, setLoginEmail] = useState('');
@@ -145,12 +146,14 @@ export default function Home() {
       const { data: sess, error } = await supabase.auth.getSession();
       if (error) setMsg(`NG: ${error.message}`);
       setUserEmail(sess.session?.user?.email ?? null);
+      setUserId(sess.session?.user?.id ?? null);
 
       setLoading(false);
     })();
 
     const { data: sub } = supabase.auth.onAuthStateChange(async (_event: any, session: any) => {
       setUserEmail(session?.user?.email ?? null);
+      setUserId(session?.user?.id ?? null);
     });
 
     return () => sub.subscription.unsubscribe();
@@ -191,7 +194,7 @@ export default function Home() {
   const YOSOU_MARKS = ['◎', '○', '▲', '△', '☆', '✓', '消'];
 
   async function saveUmaMark(horseId: string, mark: string) {
-    if (!activeRaceId || !userEmail) return;
+    if (!activeRaceId || !userEmail || !userId) return;
 
     const k = cellKey(horseId, activeRaceId);
     const existingMemos = memosByHorseRace[k] ?? [];
@@ -201,6 +204,7 @@ export default function Home() {
       ...(myMemo ? { id: myMemo.id } : {}),
       race_id: activeRaceId,
       horse_id: horseId,
+      user_id: userId,
       author_name: userEmail,
       uma_mark8: mark || null,
       race_comment: myMemo?.race_comment ?? null,
