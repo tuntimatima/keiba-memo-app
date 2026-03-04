@@ -378,9 +378,14 @@ export default function Home() {
       racesByHorse[x.horse_id].push(rr);
     }
 
-    const targetRace = raceMap.get(raceId);
-    const targetDate = targetRace?.race_date ?? '9999-12-31';
-    const targetNo = targetRace?.race_no ?? 999;
+    const { data: currentRaceData } = await supabase
+      .from('races')
+      .select('race_date,race_no')
+      .eq('race_id', raceId)
+      .single();
+
+    const targetDate = currentRaceData?.race_date ?? '9999-12-31';
+    const targetNo = currentRaceData?.race_no ?? 999;
 
     for (const hid of Object.keys(racesByHorse)) {
       const pastRaces = racesByHorse[hid].filter(r => {
