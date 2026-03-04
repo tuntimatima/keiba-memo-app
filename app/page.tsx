@@ -976,7 +976,7 @@ export default function Home() {
                     <td className="centerCell">{h.umaban ?? '-'}</td>
                     <td className="nameCell" title={h.horse_name}>{h.horse_name}</td>
 
-                    <td className="cell" style={{ verticalAlign: 'top', padding: 4 }}>
+                    <td className="cell" style={{ verticalAlign: 'middle', padding: 4 }}>
                       {renderYosouMarkCell(h.horse_id)}
                     </td>
 
