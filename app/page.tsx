@@ -286,26 +286,29 @@ export default function Home() {
           />
         ) : null}
 
-        {othersMemos.map(m => (
-          <div
-            key={m.id}
-            title={m.author_name ?? ''}
-            style={{
-              backgroundColor: getAuthorColor(m.author_name),
-              padding: '2px 4px',
-              borderRadius: 4,
-              fontSize: 11,
-              fontWeight: 800,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              color: '#111'
-            }}
-          >
-            <span style={{ marginRight: 4 }}>{m.uma_mark8}</span>
-            <span style={{ fontSize: 9, opacity: 0.8 }}>{m.author_name?.split('@')[0]}</span>
-          </div>
-        ))}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+          {othersMemos.map(m => (
+            <div
+              key={m.id}
+              title={m.author_name ?? ''}
+              style={{
+                backgroundColor: getAuthorColor(m.author_name),
+                borderRadius: 4,
+                fontSize: 10,
+                fontWeight: 800,
+                color: '#111',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 18,
+                height: 18,
+                lineHeight: '18px'
+              }}
+            >
+              {m.uma_mark8}
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -878,8 +881,7 @@ export default function Home() {
             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
               {userEmail && (
                 <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                  <span style={{ fontSize: 10, fontWeight: 800 }}>My予想:</span>
-                  {[1, 2, 3].map(btnIndex => {
+                  {[1].map(btnIndex => {
                     const myYosou = raceYosous.find(y => y.author_name === userEmail && y.uma_mark8 === `yosou_${btnIndex}`);
                     const hasText = !!myYosou?.race_comment?.trim();
                     const bgColor = hasText ? getAuthorColor(userEmail) : '#fff';
@@ -891,13 +893,13 @@ export default function Home() {
                           backgroundColor: bgColor,
                           border: '1px solid #999',
                           borderRadius: 4,
-                          padding: '2px 10px',
+                          padding: '2px 12px',
                           cursor: 'pointer',
                           fontWeight: 800,
                           color: '#111'
                         }}
                       >
-                        予想{btnIndex}
+                        予想
                       </button>
                     )
                   })}
@@ -911,7 +913,7 @@ export default function Home() {
               )).map(author => (
                 <div key={author} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                   <span style={{ fontSize: 10 }}>{author.split('@')[0]}:</span>
-                  {[1, 2, 3].map(btnIndex => {
+                  {[1].map(btnIndex => {
                     const theirYosou = raceYosous.find(y => y.author_name === author && y.uma_mark8 === `yosou_${btnIndex}`);
                     if (!theirYosou?.race_comment?.trim()) return null;
                     return (
@@ -922,13 +924,13 @@ export default function Home() {
                           backgroundColor: getAuthorColor(author),
                           border: '1px solid #ccc',
                           borderRadius: 4,
-                          padding: '2px 10px',
+                          padding: '2px 12px',
                           cursor: 'pointer',
                           fontWeight: 800,
                           color: '#111'
                         }}
                       >
-                        予想{btnIndex}
+                        予想
                       </button>
                     )
                   })}
@@ -1047,7 +1049,7 @@ export default function Home() {
         <div className="modal-overlay" onClick={() => setYosouModalOpen(false)}>
           <div id="floatWindow" onClick={(e) => e.stopPropagation()} style={{ width: 400 }}>
             <div className="fw-header">
-              <span>{yosouModalAuthor === userEmail ? `予想${yosouModalIndex}の編集` : `${yosouModalAuthor?.split('@')[0]}の予想${yosouModalIndex}`}</span>
+              <span>{yosouModalAuthor === userEmail ? `予想の編集` : `${yosouModalAuthor?.split('@')[0]}の予想`}</span>
               <span style={{ cursor: 'pointer' }} onClick={() => setYosouModalOpen(false)}>✕</span>
             </div>
             <div className="fw-body">
