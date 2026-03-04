@@ -132,6 +132,14 @@ export default function Home() {
   const [horsesView, setHorsesView] = useState<HorseViewRow[]>([]);
   const [memosByHorseRace, setMemosByHorseRace] = useState<Record<string, MemoRow[]>>({});
 
+  // 予想エリア（horse_id nullのメモ）
+  const [raceYosous, setRaceYosous] = useState<MemoRow[]>([]);
+  const [yosouModalOpen, setYosouModalOpen] = useState(false);
+  const [yosouModalIndex, setYosouModalIndex] = useState<number>(1);
+  const [yosouModalAuthor, setYosouModalAuthor] = useState<string>('');
+  const [yosouModalEditable, setYosouModalEditable] = useState(false);
+  const [yosouModalText, setYosouModalText] = useState('');
+
   // モーダル（セルクリックで全文）
   const [modalOpen, setModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState('');
@@ -215,6 +223,44 @@ export default function Home() {
     if (error) {
       setMsg(`印の保存失敗: ${error.message}`);
     } else {
+      await loadRaceView(activeRaceId);
+    }
+  }
+
+  function openYosouModal(index: number, author: string, editable: boolean) {
+    const yosou = raceYosous.find(y => y.author_name === author && y.uma_mark8 === `yosou_${index}`);
+    setYosouModalIndex(index);
+    setYosouModalAuthor(author);
+    setYosouModalEditable(editable);
+    setYosouModalText(yosou?.race_comment ?? '');
+    setYosouModalOpen(true);
+  }
+
+  async function saveYosou() {
+    if (!activeRaceId || !userEmail || !userId) return;
+
+    const existing = raceYosous.find(y => y.author_name === userEmail && y.uma_mark8 === `yosou_${yosouModalIndex}`);
+    const textToSave = yosouModalText.trim();
+
+    const payload = {
+      ...(existing ? { id: existing.id } : {}),
+      race_id: activeRaceId,
+      horse_id: null,
+      user_id: userId,
+      author_name: userEmail,
+      uma_mark8: `yosou_${yosouModalIndex}`,
+      race_comment: textToSave,
+      result_comment: existing?.result_comment ?? null,
+    };
+
+    setAuthBusy(true);
+    const { error } = await supabase.from('memos').upsert(payload, existing ? { onConflict: 'id' } : undefined);
+    setAuthBusy(false);
+
+    if (error) {
+      setMsg(`予想の保存失敗: ${error.message}`);
+    } else {
+      setYosouModalOpen(false);
       await loadRaceView(activeRaceId);
     }
   }
@@ -545,7 +591,6 @@ export default function Home() {
     const { data: memos, error: mErr } = await supabase
       .from('memos')
       .select('id,race_id,horse_id,uma_mark8,race_comment,result_comment,author_name,created_at')
-      .in('horse_id', horseIds)
       .in('race_id', fetchRaceIds)
       .order('created_at', { ascending: false });
 
@@ -554,12 +599,20 @@ export default function Home() {
       setMsg(`NG: memos load: ${mErr.message}`);
       setHorsesView([]);
       setMemosByHorseRace({});
+      setRaceYosous([]);
       return;
     }
 
     const memMap: Record<string, MemoRow[]> = {};
+    const yosouArr: MemoRow[] = [];
     (memos ?? []).forEach((mm: any) => {
-      if (!mm.horse_id || !mm.race_id) return;
+      if (!mm.horse_id) {
+        if (mm.race_id === raceId && mm.uma_mark8?.startsWith('yosou_')) {
+          yosouArr.push(mm);
+        }
+        return;
+      }
+      if (!mm.race_id) return;
       const k = cellKey(mm.horse_id, mm.race_id);
       (memMap[k] ??= []).push({
         id: mm.id,
@@ -583,6 +636,7 @@ export default function Home() {
 
     setHorsesView(view);
     setMemosByHorseRace(memMap);
+    setRaceYosous(yosouArr);
     setLoading(false);
     setMsg(`OK: 出走馬 ${view.length}頭 / 最新5走メモ表示`);
   }
@@ -598,6 +652,7 @@ export default function Home() {
       setLoading(false);
       setHorsesView([]);
       setMemosByHorseRace({});
+      setRaceYosous([]);
       setRaceHeaderText('');
       setMsg(`NG: races に該当なし（${dateISO} / ${place} / ${raceNo}R）`);
       return;
@@ -707,6 +762,7 @@ export default function Home() {
                   setRaceHeaderText('');
                   setHorsesView([]);
                   setMemosByHorseRace({});
+                  setRaceYosous([]);
                   setMsg('');
                   return;
                 }
@@ -814,8 +870,71 @@ export default function Home() {
 
       <div className="wrap">
         {raceHeaderText ? (
-          <div style={{ fontWeight: 900, fontSize: 14, marginBottom: 8 }}>
-            {raceHeaderText}
+          <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+            <div style={{ fontWeight: 900, fontSize: 14 }}>
+              {raceHeaderText}
+            </div>
+
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              {userEmail && (
+                <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                  <span style={{ fontSize: 10, fontWeight: 800 }}>My予想:</span>
+                  {[1, 2, 3].map(btnIndex => {
+                    const myYosou = raceYosous.find(y => y.author_name === userEmail && y.uma_mark8 === `yosou_${btnIndex}`);
+                    const hasText = !!myYosou?.race_comment?.trim();
+                    const bgColor = hasText ? getAuthorColor(userEmail) : '#fff';
+                    return (
+                      <button
+                        key={`my_${btnIndex}`}
+                        onClick={() => openYosouModal(btnIndex, userEmail, true)}
+                        style={{
+                          backgroundColor: bgColor,
+                          border: '1px solid #999',
+                          borderRadius: 4,
+                          padding: '2px 10px',
+                          cursor: 'pointer',
+                          fontWeight: 800,
+                          color: '#111'
+                        }}
+                      >
+                        予想{btnIndex}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+
+              {Array.from(new Set(
+                raceYosous
+                  .filter(y => y.author_name && y.author_name !== userEmail && y.race_comment?.trim())
+                  .map(y => y.author_name!)
+              )).map(author => (
+                <div key={author} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                  <span style={{ fontSize: 10 }}>{author.split('@')[0]}:</span>
+                  {[1, 2, 3].map(btnIndex => {
+                    const theirYosou = raceYosous.find(y => y.author_name === author && y.uma_mark8 === `yosou_${btnIndex}`);
+                    if (!theirYosou?.race_comment?.trim()) return null;
+                    return (
+                      <button
+                        key={`${author}_${btnIndex}`}
+                        onClick={() => openYosouModal(btnIndex, author, false)}
+                        style={{
+                          backgroundColor: getAuthorColor(author),
+                          border: '1px solid #ccc',
+                          borderRadius: 4,
+                          padding: '2px 10px',
+                          cursor: 'pointer',
+                          fontWeight: 800,
+                          color: '#111'
+                        }}
+                      >
+                        予想{btnIndex}
+                      </button>
+                    )
+                  })}
+                </div>
+              ))}
+            </div>
           </div>
         ) : null}
 
@@ -918,6 +1037,38 @@ export default function Home() {
                     <div className="fw-text" style={{ backgroundColor: getAuthorColor(m.author_name), padding: '6px 8px', borderRadius: '0 4px 4px 0' }}>{m.result_comment ?? ''}</div>
                   </div>
                 ))
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {yosouModalOpen ? (
+        <div className="modal-overlay" onClick={() => setYosouModalOpen(false)}>
+          <div id="floatWindow" onClick={(e) => e.stopPropagation()} style={{ width: 400 }}>
+            <div className="fw-header">
+              <span>{yosouModalAuthor === userEmail ? `予想${yosouModalIndex}の編集` : `${yosouModalAuthor?.split('@')[0]}の予想${yosouModalIndex}`}</span>
+              <span style={{ cursor: 'pointer' }} onClick={() => setYosouModalOpen(false)}>✕</span>
+            </div>
+            <div className="fw-body">
+              <div style={{ fontWeight: 800, marginBottom: 8 }}>{raceHeaderText}</div>
+              {yosouModalEditable ? (
+                <>
+                  <textarea
+                    value={yosouModalText}
+                    onChange={(e) => setYosouModalText(e.target.value)}
+                    style={{ width: '100%', height: 160, padding: 8, boxSizing: 'border-box', border: '1px solid #ccc', borderRadius: 4, resize: 'vertical' }}
+                    placeholder="予想を自由に入力..."
+                  />
+                  <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                    <button type="button" onClick={() => setYosouModalOpen(false)} style={{ padding: '6px 12px', cursor: 'pointer', border: '1px solid #ccc', background: '#fff', borderRadius: 4 }}>キャンセル</button>
+                    <button type="button" onClick={saveYosou} disabled={authBusy} style={{ padding: '6px 12px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 800 }}>保存</button>
+                  </div>
+                </>
+              ) : (
+                <div className="fw-text" style={{ whiteSpace: 'pre-wrap' }}>
+                  {yosouModalText}
+                </div>
               )}
             </div>
           </div>
