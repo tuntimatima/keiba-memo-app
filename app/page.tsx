@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 import { supabase } from '../lib/supabaseClient';
 
 import Link from 'next/link';
@@ -591,11 +591,29 @@ export default function Home() {
 
     const fetchRaceIds = Array.from(new Set([...last5RaceIds, raceId]));
 
-    const { data: memos, error: mErr } = await supabase
-      .from('memos')
-      .select('id,race_id,horse_id,uma_mark8,race_comment,result_comment,author_name,created_at')
-      .in('race_id', fetchRaceIds)
-      .order('created_at', { ascending: false });
+    const chunkArray = <T,>(arr: T[], size: number): T[][] => {
+      const res: T[][] = [];
+      for (let i = 0; i < arr.length; i += size) res.push(arr.slice(i, i + size));
+      return res;
+    };
+
+    let allMemos: any[] = [];
+    let mErr: any = null;
+
+    for (const chunk of chunkArray(fetchRaceIds, 40)) {
+      const { data, error } = await supabase
+        .from('memos')
+        .select('id,race_id,horse_id,uma_mark8,race_comment,result_comment,author_name,created_at')
+        .in('race_id', chunk)
+        .order('created_at', { ascending: false })
+        .limit(1000);
+
+      if (error) {
+        mErr = error;
+        break;
+      }
+      if (data) allMemos = allMemos.concat(data);
+    }
 
     if (mErr) {
       setLoading(false);
@@ -605,6 +623,10 @@ export default function Home() {
       setRaceYosous([]);
       return;
     }
+
+    // Sort combined memos by created_at descending
+    allMemos.sort((a, b) => (new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+    const memos = allMemos;
 
     const memMap: Record<string, MemoRow[]> = {};
     const yosouArr: MemoRow[] = [];
@@ -953,15 +975,16 @@ export default function Home() {
               <th style={{ width: 54 }}>馬</th>
               <th style={{ width: 154 }}>馬名</th>
               <th style={{ width: 80 }}>印</th>
+              <th style={{ width: 200 }}>現走メモ</th>
               <th colSpan={5}>最新5走メモ（クリックで全文）</th>
             </tr>
           </thead>
 
           <tbody>
             {loading ? (
-              <tr><td colSpan={9} style={{ padding: 12, opacity: 0.7 }}>Loading...</td></tr>
+              <tr><td colSpan={10} style={{ padding: 12, opacity: 0.7 }}>Loading...</td></tr>
             ) : horsesView.length === 0 ? (
-              <tr><td colSpan={9} style={{ padding: 12, opacity: 0.7 }}>表示する馬がありません（レースを選択してください）</td></tr>
+              <tr><td colSpan={10} style={{ padding: 12, opacity: 0.7 }}>表示する馬がありません（レースを選択してください）</td></tr>
             ) : (
               horsesView.map((h) => {
                 const w = wakuStyle(h.waku);
@@ -978,6 +1001,32 @@ export default function Home() {
 
                     <td className="cell" style={{ verticalAlign: 'middle', padding: 4 }}>
                       {renderYosouMarkCell(h.horse_id)}
+                    </td>
+
+                    <td className="cell" style={{ verticalAlign: 'top', padding: 4, fontSize: 10 }} onClick={() => {
+                      if (!activeRaceId) return;
+                      openCellModal(h, {
+                        race_id: activeRaceId,
+                        race_date: selectedDate,
+                        place: activePlace,
+                        race_no: activeRaceNo,
+                        race_name: raceHeaderText,
+                        surface: '',
+                        distance_m: null,
+                      });
+                    }} role="button">
+                      {(() => {
+                        if (!activeRaceId) return null;
+                        const k = cellKey(h.horse_id, activeRaceId);
+                        const items = memosByHorseRace[k] ?? [];
+                        if (items.length === 0) return <div style={{ opacity: 0.6 }}>（メモなし）</div>;
+                        return items.map((m) => (
+                          <div key={m.id} style={{ marginBottom: 4 }}>
+                            {m.race_comment ? <div className="memo-line race-comm">{m.race_comment}</div> : null}
+                            {m.result_comment ? <div className="memo-line res-comm" style={{ backgroundColor: getAuthorColor(m.author_name) }}>{m.result_comment}</div> : null}
+                          </div>
+                        ));
+                      })()}
                     </td>
 
                     {cols.map((r, idx) => {

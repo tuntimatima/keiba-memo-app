@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
@@ -102,6 +102,7 @@ function normalizeDate(s: string): string | null {
 
 export default function ImportPage() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
 
   const [status, setStatus] = useState<string>('');
   const [busy, setBusy] = useState(false);
@@ -114,6 +115,7 @@ export default function ImportPage() {
     (async () => {
       const { data } = await supabase.auth.getSession();
       setUserEmail(data.session?.user?.email ?? null);
+      setUserId(data.session?.user?.id ?? null);
     })();
   }, []);
 
@@ -179,13 +181,31 @@ export default function ImportPage() {
       return;
     }
 
+    // 必ず最新のセッションを取得する（キャッシュされたクライアントが認証を持たない場合に備える）
+    const { data: sessionData } = await supabase.auth.getSession();
+    const session = sessionData?.session;
+    if (!session?.user?.id) {
+      setStatus('NG: ログイン情報を取得できませんでした。ログインし直してください。');
+      return;
+    }
+
+    const currentUserId = session.user.id;
+    const currentUserEmail = session.user.email ?? null;
+
+    // 認証済みのアクセストークンをセットし直す（RLS対策）
+    await supabase.auth.setSession({
+      access_token: session.access_token,
+      refresh_token: session.refresh_token,
+    });
+
     setBusy(true);
-    setStatus('');
+    setStatus('1/5 データ解析中...');
 
     const racesMap = new Map<string, any>();
     const horsesMap = new Map<string, any>();
     const entriesMap = new Map<string, any>();
-    const memos: any[] = [];
+    const memosInCsv: any[] = [];
+
 
     for (const r of csvRows) {
       const raceIdRaw = (r['レースID(新)'] ?? '').trim();
@@ -208,8 +228,7 @@ export default function ImportPage() {
       const horseName = (r['馬名'] ?? '').trim() || null;
       const horseId = (r['血統登録番号'] ?? '').trim();
 
-      if (!raceId) continue;
-      if (!horseId) continue;
+      if (!raceId || !horseId) continue;
 
       if (!racesMap.has(raceId)) {
         racesMap.set(raceId, {
@@ -244,16 +263,15 @@ export default function ImportPage() {
       const raceComment = (r['レースコメント'] ?? '').trim() || null;
       const resultComment = (r['結果コメント'] ?? '').trim() || null;
 
-      if (mark8 || raceComment || resultComment) {
-        memos.push({
-          race_id: raceId,
-          horse_id: horseId,
-          uma_mark8: mark8,
-          race_comment: raceComment,
-          result_comment: resultComment,
-          author_name: userEmail,
-        });
-      }
+      memosInCsv.push({
+        race_id: raceId,
+        horse_id: horseId,
+        user_id: currentUserId,
+        author_name: currentUserEmail,
+        uma_mark8: mark8,
+        race_comment: raceComment,
+        result_comment: resultComment,
+      });
     }
 
     const races = Array.from(racesMap.values());
@@ -261,27 +279,112 @@ export default function ImportPage() {
     const entries = Array.from(entriesMap.values());
 
     try {
+      // Reactに画面更新の機会を与えるためのyield関数
+      const tick = () => new Promise<void>(r => setTimeout(r, 0));
+
+      const chunkArray = <T,>(arr: T[], size: number): T[][] => {
+        const res: T[][] = [];
+        for (let i = 0; i < arr.length; i += size) res.push(arr.slice(i, i + size));
+        return res;
+      };
+
       if (races.length) {
-        const { error } = await (supabase.from('races') as any).upsert(races, { onConflict: 'race_id' });
-        if (error) throw new Error(`races upsert: ${error.message}`);
+        setStatus(`2/5 レース情報更新中 (${races.length}件)...`);
+        await tick();
+        for (const chunk of chunkArray(races, 1000)) {
+          const { error } = await (supabase.from('races') as any).upsert(chunk, { onConflict: 'race_id' });
+          if (error) throw new Error(`races upsert: ${error.message}`);
+        }
       }
       if (horses.length) {
-        const { error } = await (supabase.from('horses') as any).upsert(horses, { onConflict: 'horse_id' });
-        if (error) throw new Error(`horses upsert: ${error.message}`);
+        setStatus(`3/5 馬情報更新中 (${horses.length}件)...`);
+        await tick();
+        for (const chunk of chunkArray(horses, 1000)) {
+          const { error } = await (supabase.from('horses') as any).upsert(chunk, { onConflict: 'horse_id' });
+          if (error) throw new Error(`horses upsert: ${error.message}`);
+        }
       }
       if (entries.length) {
-        const { error } = await (supabase.from('entries') as any).upsert(entries, { onConflict: 'race_id,horse_id' });
-        if (error) throw new Error(`entries upsert: ${error.message}`);
-      }
-      if (memos.length) {
-        const { error } = await (supabase.from('memos') as any).insert(memos);
-        if (error) throw new Error(`memos insert: ${error.message}`);
+        setStatus(`4/5 出走馬情報更新中 (${entries.length}件)...`);
+        await tick();
+        for (const chunk of chunkArray(entries, 1000)) {
+          const { error } = await (supabase.from('entries') as any).upsert(chunk, { onConflict: 'race_id,horse_id' });
+          if (error) throw new Error(`entries upsert: ${error.message}`);
+        }
       }
 
-      setStatus(
-        `OK: 取込完了（races=${races.length}, horses=${horses.length}, entries=${entries.length}, memos=${memos.length}）`
-      );
+      if (memosInCsv.length) {
+        setStatus(`5/5 既存メモ確認中 (${memosInCsv.length}件)...`);
+        await tick();
+        const raceIds = Array.from(racesMap.keys());
+        const existingMap = new Map();
+
+        for (const rChunk of chunkArray(raceIds, 50)) {
+          const { data: existingMemos, error: fetchErr } = await supabase
+            .from('memos')
+            .select('id, race_id, horse_id, user_id, race_comment, result_comment, uma_mark8')
+            .in('race_id', rChunk)
+            .eq('user_id', currentUserId);
+
+          if (fetchErr) throw new Error(`memos fetch: ${fetchErr.message}`);
+          if (existingMemos) {
+            for (const em of existingMemos) {
+              existingMap.set(`${em.race_id}_${em.horse_id}_${em.user_id}`, em);
+            }
+          }
+        }
+
+        const memosToUpdate: any[] = [];
+        const memosToInsert: any[] = [];
+
+        for (const m of memosInCsv) {
+          const k = `${m.race_id}_${m.horse_id}_${currentUserId}`;
+          const existing = existingMap.get(k);
+          const hasData = m.uma_mark8 || m.race_comment || m.result_comment;
+
+          if (existing) {
+            memosToUpdate.push({
+              id: existing.id,
+              race_id: m.race_id,
+              horse_id: m.horse_id,
+              user_id: currentUserId,
+              author_name: currentUserEmail,
+              uma_mark8: m.uma_mark8 || existing.uma_mark8 || null,
+              race_comment: m.race_comment || existing.race_comment || null,
+              result_comment: m.result_comment || existing.result_comment || null,
+            });
+          } else if (hasData) {
+            memosToInsert.push({
+              race_id: m.race_id,
+              horse_id: m.horse_id,
+              user_id: currentUserId,
+              author_name: currentUserEmail,
+              uma_mark8: m.uma_mark8 || null,
+              race_comment: m.race_comment || null,
+              result_comment: m.result_comment || null,
+            });
+          }
+        }
+
+        if (memosToUpdate.length) {
+          setStatus(`5/5 メモ更新中 (${memosToUpdate.length}件)...`);
+          for (const chunk of chunkArray(memosToUpdate, 1000)) {
+            const { error } = await (supabase.from('memos') as any).upsert(chunk, { onConflict: 'id' });
+            if (error) throw new Error(`memos update: ${error.message}`);
+          }
+        }
+        if (memosToInsert.length) {
+          setStatus(`5/5 新規メモ登録中 (${memosToInsert.length}件)...`);
+          for (const chunk of chunkArray(memosToInsert, 1000)) {
+            const { error } = await (supabase.from('memos') as any).insert(chunk);
+            if (error) throw new Error(`memos insert: ${error.message}`);
+          }
+        }
+      }
+
+      setStatus(`OK: 取込完了 (races:${races.length}, horses:${horses.length}, memos:${memosInCsv.length})`);
     } catch (err: any) {
+      console.error(err);
       setStatus(`NG: ${err?.message ?? String(err)}`);
     } finally {
       setBusy(false);
@@ -289,7 +392,7 @@ export default function ImportPage() {
   }
 
   return (
-    <div style={{ padding: 24, maxWidth: 980, margin: '0 auto' }}>
+    <div style={{ padding: 24, maxWidth: 980, margin: '0 auto', backgroundColor: '#e8f4fd', minHeight: '100vh' }}>
       <div
         style={{
           display: 'flex',
